@@ -2,8 +2,9 @@ import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
-import Button from "../../components/ui/Button";
 import Input from "../../components/ui/Input";
+import PasswordInput from "../../components/ui/PasswordInput";
+import Button from "../../components/ui/Button";
 
 import {
   loginSchema,
@@ -45,9 +46,8 @@ function LoginPage() {
           error={errors.email?.message}
         />
 
-        <Input
+        <PasswordInput
           label="Password"
-          type="password"
           placeholder="••••••••"
           {...register("password")}
           error={errors.password?.message}
@@ -57,7 +57,7 @@ function LoginPage() {
           <label className="flex items-center gap-2 text-gray-600">
             <input
               type="checkbox"
-              className="rounded border-gray-300"
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             Remember me
           </label>
