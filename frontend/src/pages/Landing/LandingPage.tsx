@@ -16,8 +16,9 @@ function LandingPage() {
       <HowItWorks />
       <WhyChooseUs />
       <Testimonials />
-      <FAQ />
       <CTA />
+      <FAQ />
+      
     </>
   );
 }
