@@ -18,7 +18,11 @@ function Input({
       </label>
 
       <input
-        className={`w-full rounded-xl border border-gray-300 px-4 py-3 outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-200 ${className}`}
+        className={`w-full rounded-xl border px-4 py-3 outline-none transition focus:ring-2 ${
+          error
+            ? "border-red-500 focus:ring-red-200"
+            : "border-gray-300 focus:border-blue-600 focus:ring-blue-200"
+        } ${className}`}
         {...props}
       />
 
