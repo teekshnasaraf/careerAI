@@ -43,7 +43,7 @@ const menuItems = [
 
 function Sidebar() {
   return (
-    <aside className="flex h-screen w-64 flex-col border-r bg-white">
+    <aside className="sticky top-0 flex h-screen w-64 flex-col border-r bg-white">
       <div className="border-b p-6">
         <h1 className="text-3xl font-bold text-blue-600">
           CareerAI
