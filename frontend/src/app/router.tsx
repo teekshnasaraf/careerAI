@@ -9,6 +9,7 @@ import LoginPage from "../pages/Login/LoginPage";
 import RegisterPage from "../pages/Register/RegisterPage";
 import DashboardPage from "../pages/Dashboard/DashboardPage";
 import ResumePage from "../pages/Resume/ResumePage";
+import AnalysisPage from "../pages/Analysis/AnalysisPage";
 
 import ProtectedRoute from "../components/auth/ProtectedRoute";
 
@@ -36,6 +37,10 @@ export const router = createBrowserRouter([
       {
         path: "/resume",
         element: <ResumePage />,
+      },
+      {
+        path: "/analysis",
+        element: <AnalysisPage />,
       },
     ],
   },

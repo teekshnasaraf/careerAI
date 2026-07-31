@@ -7,6 +7,7 @@ import path from "path";
 
 import authRoutes from "./routes/auth.routes";
 import resumeRoutes from "./routes/resume.routes";
+import analysisRoutes from "./routes/analysis.routes";
 
 dotenv.config();
 
@@ -30,6 +31,7 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/resume", resumeRoutes);
+app.use("/api/analysis", analysisRoutes);
 
 // Health Check
 app.get("/", (_req, res) => {
