@@ -2,6 +2,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
+import axios from "axios";
 
 import Input from "../../components/ui/Input";
 import PasswordInput from "../../components/ui/PasswordInput";
@@ -42,10 +43,25 @@ function RegisterPage() {
       alert("Registration Successful!");
 
       navigate("/login");
-    } catch (error: any) {
-      setServerError(
-        error.response?.data?.message || "Registration failed"
-      );
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data as {
+          message?: string;
+          errors?: Record<string, string[]>;
+        };
+
+        const firstFieldError = responseData?.errors
+          ? Object.values(responseData.errors).flat()[0]
+          : undefined;
+
+        setServerError(
+          responseData?.message ||
+            firstFieldError ||
+            "Registration failed"
+        );
+      } else {
+        setServerError("Something went wrong");
+      }
     } finally {
       setLoading(false);
     }

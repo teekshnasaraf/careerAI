@@ -7,9 +7,14 @@ const validate =
     const result = schema.safeParse(req.body);
 
     if (!result.success) {
+      const fieldErrors = result.error.flatten().fieldErrors;
+      const firstError =
+        Object.values(fieldErrors).flat()[0] || "Validation failed";
+
       res.status(400).json({
         success: false,
-        errors: result.error.flatten().fieldErrors,
+        message: firstError,
+        errors: fieldErrors,
       });
       return;
     }

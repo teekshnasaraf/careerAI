@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import bcrypt from "bcrypt";
 
 import User from "../models/User";
+import { generateToken } from "../utils/jwt";
 
 export const register = async (
   req: Request,
@@ -9,9 +10,9 @@ export const register = async (
 ): Promise<void> => {
   try {
     const { fullName, email, password } = req.body;
+    const normalizedEmail = email.toLowerCase().trim();
 
-    // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: normalizedEmail });
 
     if (existingUser) {
       res.status(400).json({
@@ -21,13 +22,11 @@ export const register = async (
       return;
     }
 
-    // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create new user
     const user = await User.create({
       fullName,
-      email,
+      email: normalizedEmail,
       password: hashedPassword,
     });
 
@@ -35,9 +34,11 @@ export const register = async (
       success: true,
       message: "User registered successfully",
       data: {
-        id: user._id,
+        id: user.id,
+        _id: user.id,
         fullName: user.fullName,
         email: user.email,
+        role: user.role,
       },
     });
   } catch (error) {
@@ -50,16 +51,15 @@ export const register = async (
   }
 };
 
-import { generateToken } from "../utils/jwt";
-
 export const login = async (
   req: Request,
   res: Response
 ): Promise<void> => {
   try {
     const { email, password } = req.body;
+    const normalizedEmail = email.toLowerCase().trim();
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: normalizedEmail });
 
     if (!user) {
       res.status(401).json({
@@ -87,12 +87,15 @@ export const login = async (
     res.status(200).json({
       success: true,
       message: "Login successful",
-      token,
       data: {
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-        role: user.role,
+        token,
+        user: {
+          id: user.id,
+          _id: user.id,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+        },
       },
     });
   } catch (error) {
@@ -122,7 +125,13 @@ export const getCurrentUser = async (
 
     res.status(200).json({
       success: true,
-      data: user,
+      data: {
+        id: user.id,
+        _id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        role: user.role,
+      },
     });
   } catch (error) {
     console.error(error);

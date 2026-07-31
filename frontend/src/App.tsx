@@ -1,11 +1,8 @@
+import { RouterProvider } from "react-router-dom";
+import { router } from "./app/router";
+
 function App() {
-  return (
-    <div className="min-h-screen flex items-center justify-center">
-      <h1 className="text-5xl font-bold text-blue-600">
-        CareerAI
-      </h1>
-    </div>
-  );
+  return <RouterProvider router={router} />;
 }
 
 export default App;

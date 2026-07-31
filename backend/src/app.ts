@@ -2,7 +2,9 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import pinoHttp from "pino-http";
+
 import authRoutes from "./routes/auth.routes";
+//import resumeRoutes from "./routes/resume.routes";
 
 dotenv.config();
 
@@ -20,9 +22,11 @@ app.use(express.json());
 
 app.use(pinoHttp());
 
+// Routes
 app.use("/api/auth", authRoutes);
+//app.use("/api/resume", resumeRoutes);
 
-// Health Check Route
+// Health Check
 app.get("/", (_req, res) => {
   res.status(200).json({
     success: true,

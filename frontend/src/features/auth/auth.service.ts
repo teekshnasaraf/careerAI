@@ -19,10 +19,6 @@ export const registerUser = async (data: RegisterData) => {
 export const loginUser = async (data: LoginData) => {
   const response = await api.post("/auth/login", data);
 
-  if (response.data.token) {
-    localStorage.setItem("careerai_token", response.data.token);
-  }
-
   return response.data;
 };
 
@@ -34,3 +30,4 @@ export const getCurrentUser = async () => {
 export const logoutUser = () => {
   localStorage.removeItem("careerai_token");
 };
+

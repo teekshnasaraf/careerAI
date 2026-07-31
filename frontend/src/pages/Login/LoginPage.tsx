@@ -1,6 +1,8 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import axios from "axios";
 
 import Input from "../../components/ui/Input";
 import PasswordInput from "../../components/ui/PasswordInput";
@@ -11,7 +13,16 @@ import {
   type LoginFormData,
 } from "../../validators/auth";
 
+import { loginUser } from "../../features/auth/auth.service";
+import { useAuth } from "../../context/useAuth";
+
 function LoginPage() {
+  const navigate = useNavigate();
+  const { refreshUser } = useAuth();
+
+  const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState("");
+
   const {
     register,
     handleSubmit,
@@ -20,8 +31,49 @@ function LoginPage() {
     resolver: zodResolver(loginSchema),
   });
 
-  const onSubmit = (data: LoginFormData) => {
-    console.log(data);
+  const onSubmit = async (data: LoginFormData) => {
+    try {
+      setLoading(true);
+      setServerError("");
+
+      const response = await loginUser({
+        email: data.email,
+        password: data.password,
+      });
+
+      localStorage.setItem(
+        "careerai_token",
+        response.data.token
+      );
+
+      await refreshUser();
+
+      alert("Login Successful!");
+
+      navigate("/dashboard");
+      
+    } catch (error: unknown) {
+      if (axios.isAxiosError(error)) {
+        const responseData = error.response?.data as {
+          message?: string;
+          errors?: Record<string, string[]>;
+        };
+
+        const firstFieldError = responseData?.errors
+          ? Object.values(responseData.errors).flat()[0]
+          : undefined;
+
+        setServerError(
+          responseData?.message ||
+            firstFieldError ||
+            "Invalid email or password"
+        );
+      } else {
+        setServerError("Something went wrong");
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -33,6 +85,12 @@ function LoginPage() {
       <p className="mb-8 text-gray-500">
         Sign in to continue to CareerAI.
       </p>
+
+      {serverError && (
+        <div className="mb-4 rounded-lg bg-red-100 p-3 text-sm text-red-700">
+          {serverError}
+        </div>
+      )}
 
       <form
         onSubmit={handleSubmit(onSubmit)}
@@ -70,8 +128,11 @@ function LoginPage() {
           </Link>
         </div>
 
-        <Button type="submit">
-          Login
+        <Button
+          type="submit"
+          disabled={loading}
+        >
+          {loading ? "Signing In..." : "Login"}
         </Button>
       </form>
 
