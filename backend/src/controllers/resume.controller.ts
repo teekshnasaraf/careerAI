@@ -4,6 +4,7 @@ import path from "path";
 import Resume from "../models/Resume";
 import User from "../models/User";
 import { uploadToCloudinary, deleteFromCloudinary } from "../config/cloudinary";
+import { extractTextFromFile, parseResumeText } from "../services/resumeParser.service";
 
 export const uploadResume = async (
   req: Request,
@@ -20,11 +21,62 @@ export const uploadResume = async (
 
     const { originalname, filename, size, mimetype, path: tempFilePath } = req.file;
 
-    // Upload file to Cloudinary & remove temporary file
+    // 1. Extract raw text & parse sections from document BEFORE cloud upload deletes temp file
+    let parsedResult = {
+      summary: "",
+      skills: [] as string[],
+      experience: [] as Array<{
+        title: string;
+        company: string;
+        duration: string;
+        bulletPoints: string[];
+      }>,
+      education: [] as Array<{
+        degree: string;
+        institution: string;
+        year: string;
+      }>,
+      projects: [] as Array<{
+        title: string;
+        description: string;
+        technologies: string[];
+      }>,
+      sectionChecklist: [] as Array<{
+        name: string;
+        key: string;
+        found: boolean;
+        scoreImpact: string;
+        recommendation: string;
+      }>,
+      atsBreakdown: {
+        sectionStructureScore: 15,
+        skillsCoverageScore: 10,
+        readabilityScore: 20,
+        impactMetricsScore: 5,
+      },
+      aiFeedback: [] as Array<{
+        type: "strength" | "warning" | "tip";
+        title: string;
+        description: string;
+        actionableStep: string;
+      }>,
+      atsScore: 50,
+    };
+
+    try {
+      const extractedText = await extractTextFromFile(tempFilePath, mimetype);
+      if (extractedText && extractedText.trim().length > 5) {
+        parsedResult = parseResumeText(extractedText);
+      }
+    } catch (parseErr) {
+      console.error("Resume parsing error:", parseErr);
+    }
+
+    // 2. Upload file to Cloudinary & remove temporary file
     const cloudinaryResult = await uploadToCloudinary(tempFilePath);
     const { fileUrl, publicId } = cloudinaryResult;
 
-    // Check if user already has an existing resume (replace existing instead of creating duplicates)
+    // 3. Check if user already has an existing resume (replace existing instead of creating duplicates)
     const existingResume = await Resume.findOne({ user: req.userId });
 
     let resume;
@@ -44,19 +96,25 @@ export const uploadResume = async (
         }
       }
 
-      // Overwrite existing resume
+      // Overwrite existing resume with parsed data
       existingResume.originalName = originalname;
       existingResume.fileName = filename;
       existingResume.fileUrl = fileUrl;
       existingResume.publicId = publicId;
       existingResume.fileSize = size;
       existingResume.mimeType = mimetype;
-      existingResume.status = "uploaded";
-      existingResume.atsScore = Math.floor(Math.random() * 15) + 80;
+      existingResume.status = "parsed";
+      existingResume.atsScore = parsedResult.atsScore;
       existingResume.parsedData = {
-        summary: `Parsed content for ${originalname}. Ready for deep AI feedback.`,
-        skills: ["TypeScript", "React", "Node.js", "MongoDB", "REST APIs", "Tailwind CSS"],
+        summary: parsedResult.summary,
+        skills: parsedResult.skills,
+        experience: parsedResult.experience,
+        education: parsedResult.education,
+        projects: parsedResult.projects,
       };
+      existingResume.sectionChecklist = parsedResult.sectionChecklist;
+      existingResume.atsBreakdown = parsedResult.atsBreakdown;
+      existingResume.aiFeedback = parsedResult.aiFeedback;
 
       resume = await existingResume.save();
     } else {
@@ -69,12 +127,18 @@ export const uploadResume = async (
         publicId,
         fileSize: size,
         mimeType: mimetype,
-        status: "uploaded",
-        atsScore: 85,
+        status: "parsed",
+        atsScore: parsedResult.atsScore,
         parsedData: {
-          summary: `Parsed content for ${originalname}. Ready for deep AI feedback.`,
-          skills: ["TypeScript", "React", "Node.js", "MongoDB", "REST APIs", "Tailwind CSS"],
+          summary: parsedResult.summary,
+          skills: parsedResult.skills,
+          experience: parsedResult.experience,
+          education: parsedResult.education,
+          projects: parsedResult.projects,
         },
+        sectionChecklist: parsedResult.sectionChecklist,
+        atsBreakdown: parsedResult.atsBreakdown,
+        aiFeedback: parsedResult.aiFeedback,
       });
     }
 
@@ -85,7 +149,7 @@ export const uploadResume = async (
 
     res.status(200).json({
       success: true,
-      message: "Resume uploaded successfully",
+      message: "Resume uploaded and parsed successfully",
       data: resume,
     });
   } catch (error) {
