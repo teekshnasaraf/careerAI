@@ -1,11 +1,12 @@
-import jwt from "jsonwebtoken";
+import jwt, { Secret, SignOptions } from "jsonwebtoken";
+import { StringValue } from "ms";
 
 export const generateToken = (userId: string): string => {
-  return jwt.sign(
-    { userId },
-    process.env.JWT_SECRET as string,
-    {
-      expiresIn: process.env.JWT_EXPIRES_IN || "7d",
-    }
-  );
+  const secret: Secret = process.env.JWT_SECRET as string;
+
+  const options: SignOptions = {
+    expiresIn: (process.env.JWT_EXPIRES_IN || "7d") as StringValue,
+  };
+
+  return jwt.sign({ userId }, secret, options);
 };
