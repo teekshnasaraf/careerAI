@@ -183,7 +183,7 @@ function ResumePage() {
                   {(resume.atsScore || 50) >= 75 ? "High ATS Score" : (resume.atsScore || 50) >= 60 ? "Moderate ATS Score" : "Needs Optimization"}
                 </span>
               </div>
-              <p className="mt-2 text-xs text-gray-500">Calculated based on structure, keywords & sections</p>
+              <p className="mt-2 text-xs text-gray-500">Calculated from your resume structure, detected sections, and extracted keywords</p>
             </div>
 
             <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">

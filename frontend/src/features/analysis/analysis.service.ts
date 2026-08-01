@@ -1,5 +1,5 @@
 import api from "../../services/api";
-import type { AnalysisData, AiSectionImprovement, AiSkillGapResult } from "../../types/analysis";
+import type { AnalysisData, AiSectionImprovement } from "../../types/analysis";
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -27,7 +27,7 @@ export const improveSectionApi = async (
 
 export const runSkillGapAnalysisApi = async (
   targetRole: string
-): Promise<ApiResponse<AiSkillGapResult>> => {
+): Promise<ApiResponse<AnalysisData>> => {
   const response = await api.post("/analysis/skill-gap", { targetRole });
   return response.data;
 };

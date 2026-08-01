@@ -8,6 +8,10 @@ import path from "path";
 import authRoutes from "./routes/auth.routes";
 import resumeRoutes from "./routes/resume.routes";
 import analysisRoutes from "./routes/analysis.routes";
+import dashboardRoutes from "./routes/dashboard.routes";
+import interviewRoutes from "./routes/interview.routes";
+import progressRoutes from "./routes/progress.routes";
+import settingsRoutes from "./routes/settings.routes";
 
 dotenv.config();
 
@@ -32,6 +36,10 @@ app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use("/api/auth", authRoutes);
 app.use("/api/resume", resumeRoutes);
 app.use("/api/analysis", analysisRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/interview", interviewRoutes);
+app.use("/api/progress", progressRoutes);
+app.use("/api/settings", settingsRoutes);
 
 // Health Check
 app.get("/", (_req, res) => {

@@ -1,8 +1,19 @@
+export interface RecommendedProject {
+  title: string;
+  difficulty: "Beginner" | "Intermediate" | "Advanced";
+  description: string;
+  technologies: string[];
+}
+
 export interface LearningRoadmapItem {
   step: string;
   topic: string;
+  priority: "High" | "Medium" | "Low";
+  estimatedHours: number;
+  prerequisites: string[];
   details: string;
   recommendedResource: string;
+  weeklyPlan: string[];
 }
 
 export interface AiSkillGapResult {
@@ -10,7 +21,10 @@ export interface AiSkillGapResult {
   matchingScore: number;
   missingSkills: string[];
   missingTechnologies: string[];
-  learningPriority: string[];
+  prioritySkills: string[];
+  recommendedProjects: RecommendedProject[];
+  interviewTopics: string[];
+  certificationSuggestions: string[];
   learningRoadmap: LearningRoadmapItem[];
 }
 
@@ -25,6 +39,13 @@ export interface AnalysisData {
   resumeId: string;
   resumeScore: number;
   atsScore: number;
+  sectionScores: {
+    summaryScore: number;
+    skillsScore: number;
+    experienceScore: number;
+    educationScore: number;
+    projectsScore: number;
+  };
   sectionAnalysis: {
     summary: string;
     skills: string;
@@ -36,7 +57,11 @@ export interface AnalysisData {
   weaknesses: string[];
   suggestions: string[];
   missingSkills: string[];
-  targetRole?: string;
+  recommendedKeywords: string[];
+  actionVerbs: string[];
+  formattingSuggestions: string[];
+  topPriorityImprovements: string[];
+  targetRole: string;
   skillGapAnalysis?: AiSkillGapResult;
   createdAt: string;
   updatedAt: string;

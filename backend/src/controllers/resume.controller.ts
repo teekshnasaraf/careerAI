@@ -4,7 +4,8 @@ import path from "path";
 import Resume from "../models/Resume";
 import User from "../models/User";
 import { uploadToCloudinary, deleteFromCloudinary } from "../config/cloudinary";
-import { extractTextFromFile, parseResumeText } from "../services/resumeParser.service";
+import { buildResumeAnalysisPayload, extractTextFromFile, parseResumeText } from "../services/resumeParser.service";
+import { generateResumeAnalysis } from "../services/ai.service";
 
 export const uploadResume = async (
   req: Request,
@@ -22,49 +23,26 @@ export const uploadResume = async (
     const { originalname, filename, size, mimetype, path: tempFilePath } = req.file;
 
     // 1. Extract raw text & parse sections from document BEFORE cloud upload deletes temp file
-    let parsedResult = {
+    let parsedResult: any = {
       summary: "",
-      skills: [] as string[],
-      experience: [] as Array<{
-        title: string;
-        company: string;
-        duration: string;
-        bulletPoints: string[];
-      }>,
-      education: [] as Array<{
-        degree: string;
-        institution: string;
-        year: string;
-      }>,
-      projects: [] as Array<{
-        title: string;
-        description: string;
-        technologies: string[];
-      }>,
-      sectionChecklist: [] as Array<{
-        name: string;
-        key: string;
-        found: boolean;
-        scoreImpact: string;
-        recommendation: string;
-      }>,
+      skills: [],
+      experience: [],
+      education: [],
+      projects: [],
+      sectionChecklist: [],
       atsBreakdown: {
-        sectionStructureScore: 15,
-        skillsCoverageScore: 10,
-        readabilityScore: 20,
-        impactMetricsScore: 5,
+        sectionStructureScore: 0,
+        skillsCoverageScore: 0,
+        readabilityScore: 0,
+        impactMetricsScore: 0,
       },
-      aiFeedback: [] as Array<{
-        type: "strength" | "warning" | "tip";
-        title: string;
-        description: string;
-        actionableStep: string;
-      }>,
-      atsScore: 50,
+      aiFeedback: [],
+      atsScore: 0,
     };
 
+    let extractedText = "";
     try {
-      const extractedText = await extractTextFromFile(tempFilePath, mimetype);
+      extractedText = await extractTextFromFile(tempFilePath, mimetype);
       if (extractedText && extractedText.trim().length > 5) {
         parsedResult = parseResumeText(extractedText);
       }
@@ -80,6 +58,10 @@ export const uploadResume = async (
     const existingResume = await Resume.findOne({ user: req.userId });
 
     let resume;
+    const aiResult = await generateResumeAnalysis(
+      extractedText || JSON.stringify(parsedResult),
+      parsedResult
+    );
 
     if (existingResume) {
       // Clean up previous Cloudinary asset / local file
@@ -96,15 +78,16 @@ export const uploadResume = async (
         }
       }
 
-      // Overwrite existing resume with parsed data
+      // Overwrite existing resume with parsed data & Gemini ATS Score
       existingResume.originalName = originalname;
       existingResume.fileName = filename;
       existingResume.fileUrl = fileUrl;
       existingResume.publicId = publicId;
       existingResume.fileSize = size;
       existingResume.mimeType = mimetype;
+      existingResume.rawText = extractedText;
       existingResume.status = "parsed";
-      existingResume.atsScore = parsedResult.atsScore;
+      existingResume.atsScore = aiResult.atsScore;
       existingResume.parsedData = {
         summary: parsedResult.summary,
         skills: parsedResult.skills,
@@ -118,17 +101,18 @@ export const uploadResume = async (
 
       resume = await existingResume.save();
     } else {
-      // Create new resume document
+      // Create new resume record
       resume = await Resume.create({
         user: req.userId,
         originalName: originalname,
         fileName: filename,
-        fileUrl,
-        publicId,
+        fileUrl: fileUrl,
+        publicId: publicId,
         fileSize: size,
         mimeType: mimetype,
+        rawText: extractedText,
         status: "parsed",
-        atsScore: parsedResult.atsScore,
+        atsScore: aiResult.atsScore,
         parsedData: {
           summary: parsedResult.summary,
           skills: parsedResult.skills,
@@ -141,6 +125,31 @@ export const uploadResume = async (
         aiFeedback: parsedResult.aiFeedback,
       });
     }
+
+    // Sync Analysis document single source of truth with Gemini AI result
+    const Analysis = require("../models/Analysis").default;
+
+    await Analysis.findOneAndUpdate(
+      { user: req.userId },
+      {
+        user: req.userId,
+        resumeId: resume._id,
+        resumeScore: aiResult.resumeScore,
+        atsScore: aiResult.atsScore,
+        sectionScores: aiResult.sectionScores,
+        sectionAnalysis: aiResult.sectionAnalysis,
+        strengths: aiResult.strengths,
+        weaknesses: aiResult.weaknesses,
+        suggestions: aiResult.suggestions,
+        missingSkills: aiResult.missingSkills,
+        recommendedKeywords: aiResult.recommendedKeywords,
+        actionVerbs: aiResult.actionVerbs,
+        formattingSuggestions: aiResult.formattingSuggestions,
+        topPriorityImprovements: aiResult.topPriorityImprovements,
+        targetRole: "Full Stack Engineer",
+      },
+      { upsert: true, new: true }
+    );
 
     // Update user profile resumeUrl
     await User.findByIdAndUpdate(req.userId, {

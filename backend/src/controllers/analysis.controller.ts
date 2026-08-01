@@ -12,49 +12,57 @@ export const getLatestAnalysis = async (
   res: Response
 ): Promise<void> => {
   try {
-    const analysis = await Analysis.findOne({ user: req.userId }).sort({
+    const resume = await Resume.findOne({ user: req.userId }).sort({
+      updatedAt: -1,
+    });
+
+    if (!resume) {
+      res.status(200).json({
+        success: true,
+        message: "No resume found. Please upload a resume first.",
+        data: null,
+      });
+      return;
+    }
+
+    let analysis = await Analysis.findOne({ user: req.userId }).sort({
       updatedAt: -1,
     });
 
     if (!analysis) {
-      // Check if user has uploaded a resume to analyze automatically
-      const resume = await Resume.findOne({ user: req.userId }).sort({
-        updatedAt: -1,
-      });
+      const fullText = resume.rawText || [
+        resume.parsedData?.summary,
+        ...(resume.parsedData?.skills || []),
+        ...(resume.parsedData?.experience || []).map((e) => `${e.title} ${e.company} ${e.bulletPoints?.join(" ")}`),
+        ...(resume.parsedData?.education || []).map((e) => `${e.degree} ${e.institution}`),
+        ...(resume.parsedData?.projects || []).map((p) => `${p.title} ${p.description}`),
+      ].filter(Boolean).join("\n");
 
-      if (!resume) {
-        res.status(200).json({
-          success: true,
-          message: "No resume found. Upload a resume first to generate analysis.",
-          data: null,
-        });
-        return;
-      }
-
-      // Generate initial analysis
       const aiResult = await generateResumeAnalysis(
-        resume.parsedData?.summary || resume.originalName,
+        fullText || resume.originalName,
         resume.parsedData
       );
 
-      const newAnalysis = await Analysis.create({
+      analysis = await Analysis.create({
         user: req.userId,
         resumeId: resume._id,
         resumeScore: aiResult.resumeScore,
         atsScore: aiResult.atsScore,
+        sectionScores: aiResult.sectionScores,
         sectionAnalysis: aiResult.sectionAnalysis,
         strengths: aiResult.strengths,
         weaknesses: aiResult.weaknesses,
         suggestions: aiResult.suggestions,
         missingSkills: aiResult.missingSkills,
+        recommendedKeywords: aiResult.recommendedKeywords,
+        actionVerbs: aiResult.actionVerbs,
+        formattingSuggestions: aiResult.formattingSuggestions,
+        topPriorityImprovements: aiResult.topPriorityImprovements,
         targetRole: "Full Stack Engineer",
       });
 
-      res.status(200).json({
-        success: true,
-        data: newAnalysis,
-      });
-      return;
+      resume.atsScore = aiResult.atsScore;
+      await resume.save();
     }
 
     res.status(200).json({
@@ -87,26 +95,36 @@ export const runResumeAnalysis = async (
       return;
     }
 
-    // Call AI Service
+    const fullText = resume.rawText || [
+      resume.parsedData?.summary,
+      ...(resume.parsedData?.skills || []),
+      ...(resume.parsedData?.experience || []).map((e) => `${e.title} ${e.company} ${e.bulletPoints?.join(" ")}`),
+      ...(resume.parsedData?.education || []).map((e) => `${e.degree} ${e.institution}`),
+      ...(resume.parsedData?.projects || []).map((p) => `${p.title} ${p.description}`),
+    ].filter(Boolean).join("\n");
+
     const aiResult = await generateResumeAnalysis(
-      resume.parsedData?.summary || resume.originalName,
+      fullText || resume.originalName,
       resume.parsedData
     );
 
-    // Overwrite or create Analysis record
     const existingAnalysis = await Analysis.findOne({ user: req.userId });
 
     let analysis;
-
     if (existingAnalysis) {
       existingAnalysis.resumeId = resume._id as any;
       existingAnalysis.resumeScore = aiResult.resumeScore;
       existingAnalysis.atsScore = aiResult.atsScore;
+      existingAnalysis.sectionScores = aiResult.sectionScores;
       existingAnalysis.sectionAnalysis = aiResult.sectionAnalysis;
       existingAnalysis.strengths = aiResult.strengths;
       existingAnalysis.weaknesses = aiResult.weaknesses;
       existingAnalysis.suggestions = aiResult.suggestions;
       existingAnalysis.missingSkills = aiResult.missingSkills;
+      existingAnalysis.recommendedKeywords = aiResult.recommendedKeywords;
+      existingAnalysis.actionVerbs = aiResult.actionVerbs;
+      existingAnalysis.formattingSuggestions = aiResult.formattingSuggestions;
+      existingAnalysis.topPriorityImprovements = aiResult.topPriorityImprovements;
 
       analysis = await existingAnalysis.save();
     } else {
@@ -115,18 +133,27 @@ export const runResumeAnalysis = async (
         resumeId: resume._id,
         resumeScore: aiResult.resumeScore,
         atsScore: aiResult.atsScore,
+        sectionScores: aiResult.sectionScores,
         sectionAnalysis: aiResult.sectionAnalysis,
         strengths: aiResult.strengths,
         weaknesses: aiResult.weaknesses,
         suggestions: aiResult.suggestions,
         missingSkills: aiResult.missingSkills,
+        recommendedKeywords: aiResult.recommendedKeywords,
+        actionVerbs: aiResult.actionVerbs,
+        formattingSuggestions: aiResult.formattingSuggestions,
+        topPriorityImprovements: aiResult.topPriorityImprovements,
         targetRole: "Full Stack Engineer",
       });
     }
 
+    // Synchronize ATS Score on Resume document as well
+    resume.atsScore = aiResult.atsScore;
+    await resume.save();
+
     res.status(200).json({
       success: true,
-      message: "AI Resume Analysis completed successfully",
+      message: "AI Resume Analysis updated successfully",
       data: analysis,
     });
   } catch (error) {
@@ -153,7 +180,16 @@ export const improveSection = async (
       return;
     }
 
-    const result = await improveResumeSection(sectionType, content);
+    const resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
+    const analysis = await Analysis.findOne({ user: req.userId });
+
+    const result = await improveResumeSection(
+      sectionType,
+      content,
+      resume?.parsedData?.summary || "",
+      analysis?.targetRole || "Software Engineer",
+      analysis?.weaknesses || []
+    );
 
     res.status(200).json({
       success: true,
@@ -187,12 +223,12 @@ export const runSkillGapAnalysis = async (
       updatedAt: -1,
     });
 
-    const userSkills = resume?.parsedData?.skills || ["React", "JavaScript", "TypeScript", "Node.js"];
+    const userSkills = resume?.parsedData?.skills || [];
+    const resumeContext = resume?.parsedData?.summary || resume?.originalName || "";
 
-    const skillGap = await generateSkillGapAnalysis(userSkills, targetRole);
+    const skillGap = await generateSkillGapAnalysis(userSkills, targetRole, resumeContext);
 
-    // Update existing Analysis record if available
-    await Analysis.findOneAndUpdate(
+    const updatedAnalysis = await Analysis.findOneAndUpdate(
       { user: req.userId },
       { targetRole, skillGapAnalysis: skillGap },
       { new: true, upsert: true }
@@ -200,7 +236,7 @@ export const runSkillGapAnalysis = async (
 
     res.status(200).json({
       success: true,
-      data: skillGap,
+      data: updatedAnalysis,
     });
   } catch (error) {
     console.error("Error running skill gap analysis:", error);

@@ -23,6 +23,7 @@ export interface IResume extends Document {
   publicId?: string;
   fileSize: number;
   mimeType: string;
+  rawText?: string;
   atsScore?: number;
   status: "uploaded" | "processing" | "parsed" | "failed";
   parsedData?: {
@@ -97,6 +98,11 @@ const resumeSchema = new Schema<IResume>(
     mimeType: {
       type: String,
       required: true,
+    },
+
+    rawText: {
+      type: String,
+      default: "",
     },
 
     atsScore: {

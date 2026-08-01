@@ -1,14 +1,41 @@
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { buildResumeAnalysisPayload, calculateUnifiedAtsScore } from "./resumeParser.service";
 
 dotenv.config();
 
 const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
-export interface AiResumeAnalysisResult {
+async function generateAiContentWithFallback(prompt: string): Promise<string> {
+  if (!ai) return "";
+  const models = ["gemini-2.0-flash", "models/gemma-4-26b-a4b-it", "gemini-2.0-flash-lite"];
+  for (const model of models) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+      });
+      if (response.text) {
+        return response.text;
+      }
+    } catch (err: any) {
+      console.warn(`Model ${model} failed, trying fallback... (${err?.message || err})`);
+    }
+  }
+  return "";
+}
+
+export interface SingleAnalysisResult {
   resumeScore: number;
   atsScore: number;
+  sectionScores: {
+    summaryScore: number;
+    skillsScore: number;
+    experienceScore: number;
+    educationScore: number;
+    projectsScore: number;
+  };
   sectionAnalysis: {
     summary: string;
     skills: string;
@@ -20,6 +47,10 @@ export interface AiResumeAnalysisResult {
   weaknesses: string[];
   suggestions: string[];
   missingSkills: string[];
+  recommendedKeywords: string[];
+  actionVerbs: string[];
+  formattingSuggestions: string[];
+  topPriorityImprovements: string[];
 }
 
 export interface AiSectionImprovementResult {
@@ -32,253 +63,287 @@ export interface AiSkillGapResult {
   matchingScore: number;
   missingSkills: string[];
   missingTechnologies: string[];
-  learningPriority: string[];
+  prioritySkills: string[];
+  recommendedProjects: Array<{
+    title: string;
+    difficulty: "Beginner" | "Intermediate" | "Advanced";
+    description: string;
+    technologies: string[];
+  }>;
+  interviewTopics: string[];
+  certificationSuggestions: string[];
   learningRoadmap: Array<{
     step: string;
     topic: string;
+    priority: "High" | "Medium" | "Low";
+    estimatedHours: number;
+    prerequisites: string[];
     details: string;
     recommendedResource: string;
+    weeklyPlan: string[];
   }>;
 }
 
 export const generateResumeAnalysis = async (
   resumeText: string,
   parsedData?: any
-): Promise<AiResumeAnalysisResult> => {
+): Promise<SingleAnalysisResult> => {
   if (ai) {
     try {
-      const prompt = `You are an expert AI Resume Reviewer & Senior Recruiter ATS Engine. Analyze the following resume text and provide a structured JSON response.
+      const prompt = `You are a Senior Recruiter & Lead ATS System Architect. Analyze this candidate's resume and generate a single source of truth analysis JSON object.
 
-RESUME TEXT:
+RESUME FULL TEXT:
 """
-${resumeText.slice(0, 4000)}
+${resumeText.slice(0, 5000)}
 """
 
-Parsed Data Summary: ${JSON.stringify(parsedData?.summary || "")}
-Detected Skills: ${JSON.stringify(parsedData?.skills || [])}
+Extracted Summary: ${JSON.stringify(parsedData?.summary || "")}
+Extracted Skills: ${JSON.stringify(parsedData?.skills || [])}
+Extracted Experience Count: ${parsedData?.experience?.length || 0}
+Extracted Education Count: ${parsedData?.education?.length || 0}
+Extracted Projects Count: ${parsedData?.projects?.length || 0}
 
-Respond strictly with a single valid JSON object in this exact format without Markdown backticks:
+Evaluate and return ONLY a valid JSON object without Markdown backticks:
 {
-  "resumeScore": 82,
-  "atsScore": 78,
-  "sectionAnalysis": {
-    "summary": "Analysis of summary section",
-    "skills": "Analysis of technical skills section",
-    "education": "Analysis of education section",
-    "projects": "Analysis of projects section",
-    "experience": "Analysis of work experience section"
+  "resumeScore": 85,
+  "atsScore": 80,
+  "sectionScores": {
+    "summaryScore": 85,
+    "skillsScore": 80,
+    "experienceScore": 75,
+    "educationScore": 90,
+    "projectsScore": 80
   },
-  "strengths": ["Strength 1", "Strength 2", "Strength 3"],
-  "weaknesses": ["Weakness 1", "Weakness 2"],
-  "suggestions": ["Suggestion 1", "Suggestion 2"],
-  "missingSkills": ["Missing Skill 1", "Missing Skill 2"]
+  "sectionAnalysis": {
+    "summary": "Detailed evaluation of summary based on resume text",
+    "skills": "Detailed evaluation of technical skills found",
+    "education": "Detailed evaluation of education background",
+    "projects": "Detailed evaluation of projects section",
+    "experience": "Detailed evaluation of work experience section"
+  },
+  "strengths": ["Strength 1 from resume", "Strength 2"],
+  "weaknesses": ["Weakness 1 from resume", "Weakness 2"],
+  "suggestions": ["Actionable suggestion 1", "Actionable suggestion 2"],
+  "missingSkills": ["Missing skill 1", "Missing skill 2"],
+  "recommendedKeywords": ["Keyword 1", "Keyword 2"],
+  "actionVerbs": ["Architected", "Spearheaded", "Optimized"],
+  "formattingSuggestions": ["Use bullet points for experience", "Keep margins clean"],
+  "topPriorityImprovements": ["Add Work Experience header", "Include percentage metrics"]
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
+      const text = await generateAiContentWithFallback(prompt);
+      if (text) {
+        const cleanedJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        const parsed = JSON.parse(cleanedJson);
 
-      const text = response.text || "";
-      const cleanedJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      const parsed = JSON.parse(cleanedJson);
+        const scoringPayload = buildResumeAnalysisPayload({
+          summary: parsedData?.summary,
+          skills: parsedData?.skills || [],
+          experience: parsedData?.experience || [],
+          education: parsedData?.education || [],
+          projects: parsedData?.projects || [],
+          atsScore: parsed.atsScore,
+        });
 
-      return {
-        resumeScore: parsed.resumeScore || 80,
-        atsScore: parsed.atsScore || 75,
-        sectionAnalysis: {
-          summary: parsed.sectionAnalysis?.summary || "Summary parsed.",
-          skills: parsed.sectionAnalysis?.skills || "Skills evaluated.",
-          education: parsed.sectionAnalysis?.education || "Education checked.",
-          projects: parsed.sectionAnalysis?.projects || "Projects evaluated.",
-          experience: parsed.sectionAnalysis?.experience || "Experience reviewed.",
-        },
-        strengths: parsed.strengths || ["Clean structure", "Relevant tech stack"],
-        weaknesses: parsed.weaknesses || ["Could add more quantifiable metrics"],
-        suggestions: parsed.suggestions || ["Add action verbs to bullet points"],
-        missingSkills: parsed.missingSkills || ["CI/CD Pipelines", "Docker", "Unit Testing"],
-      };
+        return {
+          ...scoringPayload,
+          strengths: parsed.strengths || scoringPayload.strengths,
+          weaknesses: parsed.weaknesses || scoringPayload.weaknesses,
+          suggestions: parsed.suggestions || scoringPayload.suggestions,
+          missingSkills: parsed.missingSkills || scoringPayload.missingSkills,
+          recommendedKeywords: parsed.recommendedKeywords || scoringPayload.recommendedKeywords,
+          actionVerbs: parsed.actionVerbs || scoringPayload.actionVerbs,
+          formattingSuggestions: parsed.formattingSuggestions || scoringPayload.formattingSuggestions,
+          topPriorityImprovements: parsed.topPriorityImprovements || scoringPayload.topPriorityImprovements,
+        };
+      }
     } catch (err) {
-      console.error("Gemini API call failed, falling back to rule-based analysis:", err);
+      console.error("AI evaluation error:", err);
     }
   }
 
-  // Smart Heuristic Fallback Analysis if API key is not present or fails
-  const skillsCount = parsedData?.skills?.length || 0;
-  const hasExperience = parsedData?.experience?.length > 0;
-  const hasProjects = parsedData?.projects?.length > 0;
+  // Dynamic Rule-Based Calculation (Single Source of Truth Fallback)
+  const actualSkills = parsedData?.skills || [];
+  const skillsCount = actualSkills.length;
+  const hasExp = (parsedData?.experience?.length || 0) > 0;
+  const hasEdu = (parsedData?.education?.length || 0) > 0;
+  const hasProj = (parsedData?.projects?.length || 0) > 0;
 
-  const calculatedAts = Math.min(95, Math.max(55, 60 + skillsCount * 3 + (hasExperience ? 15 : 0)));
-  const calculatedResume = Math.min(98, Math.max(60, calculatedAts + 5));
+  const atsScore = calculateUnifiedAtsScore({
+    skillsCount,
+    hasSummary: Boolean(parsedData?.summary),
+    hasExperience: hasExp,
+    hasEducation: hasEdu,
+    hasProjects: hasProj,
+    hasSkills: skillsCount > 0,
+    hasContactInfo: true,
+  });
 
-  return {
-    resumeScore: calculatedResume,
-    atsScore: calculatedAts,
-    sectionAnalysis: {
-      summary: parsedData?.summary
-        ? "Professional summary is present and concise."
-        : "Missing an explicit Summary section header. Add a 3-sentence summary at the top.",
-      skills: `Extracted ${skillsCount} technical skills. Grouping by categories (Frontend, Backend, Database) improves recruiter readability.`,
-      education: parsedData?.education?.length
-        ? "Education section identified with degree and institution details."
-        : "Add clear degree title and graduation year.",
-      projects: hasProjects
-        ? `Found ${parsedData.projects.length} project entry/entries.`
-        : "Adding personal or academic projects demonstrates practical experience.",
-      experience: hasExperience
-        ? `Found ${parsedData.experience.length} work history entries.`
-        : "Work Experience section header was not detected. Adding an explicit Work Experience header will increase ATS matching.",
-    },
-    strengths: [
-      skillsCount > 0 ? `Identified ${skillsCount} core technical skills` : "Clear document font and layout",
-      hasProjects ? "Includes project portfolio demonstrations" : "Extractable text format",
-      "Compatible standard document margins",
-    ],
-    weaknesses: [
-      !hasExperience ? "Missing explicit Work Experience section header" : "Could include more quantifiable percentage metrics",
-      skillsCount < 8 ? "Technical keyword density is below senior recruiter benchmarks" : "Project descriptions could highlight business impact",
-    ],
-    suggestions: [
-      "Use strong action verbs like 'Architected', 'Spearheaded', and 'Optimized' at the start of bullet points.",
-      "Add quantifiable outcomes (e.g. 'improved performance by 35%').",
-      "Include missing industry keywords like Docker, CI/CD, and System Architecture.",
-    ],
-    missingSkills: ["Docker & Containers", "CI/CD Pipelines", "Jest / Unit Testing", "AWS / Cloud Infrastructure"],
-  };
+  return buildResumeAnalysisPayload({
+    summary: parsedData?.summary,
+    skills: actualSkills,
+    experience: parsedData?.experience || [],
+    education: parsedData?.education || [],
+    projects: parsedData?.projects || [],
+    atsScore,
+  });
 };
 
 export const improveResumeSection = async (
   sectionType: string,
-  content: string
+  content: string,
+  resumeContext?: string,
+  targetRole?: string,
+  atsWeaknesses?: string[]
 ): Promise<AiSectionImprovementResult> => {
   if (ai) {
     try {
-      const prompt = `You are a professional resume editor. Rewrite and improve the following ${sectionType} section to make it punchy, high-impact, and ATS optimized with strong action verbs and quantified achievements.
+      const prompt = `You are an Executive Resume Writer & Technical Recruiter. Rewrite and improve the following ${sectionType} section for candidate targeting the role "${targetRole || "Software Engineer"}".
 
-ORIGINAL CONTENT:
+CANDIDATE RESUME CONTEXT:
+"""
+${(resumeContext || "").slice(0, 2500)}
+"""
+
+KNOWN ATS WEAKNESSES TO FIX:
+${JSON.stringify(atsWeaknesses || [])}
+
+DRAFT SECTION CONTENT TO REWRITE:
 "${content}"
 
-Return a JSON object in this exact format without backticks:
+Rewrite the content to make it punchy, high-impact, and ATS optimized with strong action verbs and metric placeholders.
+
+Return ONLY a single valid JSON object without Markdown backticks:
 {
   "improvedContent": "Rewritten high-impact content here...",
-  "keyChanges": ["Changed active verbs", "Added metric placeholders", "Enhanced ATS keyword flow"]
+  "keyChanges": ["Used strong action verbs", "Added metric placeholders", "Aligned with target role keywords"]
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
+      const text = await generateAiContentWithFallback(prompt);
+      if (text) {
+        const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        const parsed = JSON.parse(cleaned);
 
-      const text = response.text || "";
-      const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-
-      return {
-        improvedContent: parsed.improvedContent || content,
-        keyChanges: parsed.keyChanges || ["Enhanced action verbs", "Optimized phrasing"],
-      };
+        return {
+          improvedContent: parsed.improvedContent || content,
+          keyChanges: parsed.keyChanges || ["Enhanced action verbs", "Optimized phrasing"],
+        };
+      }
     } catch (err) {
-      console.error("Gemini Section Improvement failed:", err);
+      console.error("AI Section Improvement error:", err);
     }
   }
 
-  // Heuristic Fallback for Section Improvement
+  const trimmed = content.trim();
   return {
-    improvedContent: `Architected and optimized ${content || "key software components"}, driving a 30% increase in application efficiency and streamlining cross-functional team workflows.`,
-    keyChanges: [
-      "Added strong action verbs (Architected, Optimized)",
-      "Inserted quantifiable performance metric (+30%)",
-      "Improved ATS keyword alignment",
-    ],
+    improvedContent: `Architected and optimized ${trimmed || "key software components"}, driving a 30% increase in application efficiency and aligning with ${targetRole || "engineering"} benchmarks.`,
+    keyChanges: ["Added strong introductory action verb", "Inserted quantifiable performance metric placeholder"],
   };
 };
 
 export const generateSkillGapAnalysis = async (
   resumeSkills: string[],
-  targetRole: string
+  targetRole: string,
+  resumeContext?: string
 ): Promise<AiSkillGapResult> => {
+  const normalizedRole = targetRole.trim();
+
   if (ai) {
     try {
-      const prompt = `Compare candidate's current skills against the target job role "${targetRole}".
+      const prompt = `You are a Lead AI Career Mentor. Generate a highly specific, non-generic skill gap analysis and learning roadmap comparing candidate's actual resume skills against standard requirements for "${normalizedRole}".
 
-CANDIDATE SKILLS: ${JSON.stringify(resumeSkills)}
+CANDIDATE ACTUAL SKILLS: ${JSON.stringify(resumeSkills)}
+RESUME CONTEXT SUMMARY: "${(resumeContext || "").slice(0, 2000)}"
+TARGET ROLE: "${normalizedRole}"
 
-Return a single JSON object in this exact format without backticks:
+Instructions:
+Generate role-specific topics:
+- If Frontend: HTML -> CSS -> JavaScript -> React -> Next.js -> Web Vitals & Accessibility -> Cloud Deployment
+- If Backend: Node.js -> Express -> Auth/JWT -> MongoDB/PostgreSQL -> Redis Caching -> System Architecture -> Cloud Deployment
+- If Cybersecurity: Networking Fundamentals -> Linux Hardening -> OWASP Top 10 -> Web Penetration Testing -> SIEM & Incident Response
+- If AI/ML: Python -> NumPy/Pandas -> Scikit-Learn -> PyTorch/TensorFlow -> Transformers & LLMs -> MLOps
+- If DevOps: Linux -> Docker -> Kubernetes -> AWS -> CI/CD GitHub Actions -> Terraform -> Prometheus
+
+Return ONLY a single valid JSON object in this format without Markdown backticks:
 {
-  "targetRole": "${targetRole}",
-  "matchingScore": 75,
-  "missingSkills": ["Docker", "Kubernetes", "GraphQL"],
-  "missingTechnologies": ["Redis", "AWS Lambda"],
-  "learningPriority": ["Master Docker & Containerization", "Learn AWS Cloud Basics", "Implement GraphQL APIs"],
+  "targetRole": "${normalizedRole}",
+  "matchingScore": 72,
+  "missingSkills": ["Missing Skill 1", "Missing Skill 2"],
+  "missingTechnologies": ["Tech 1", "Tech 2"],
+  "prioritySkills": ["High Priority Skill 1", "High Priority Skill 2"],
+  "recommendedProjects": [
+    {
+      "title": "Project Title",
+      "difficulty": "Intermediate",
+      "description": "Full description of project to build",
+      "technologies": ["React", "Node.js"]
+    }
+  ],
+  "interviewTopics": ["System Design", "State Management", "REST Architecture"],
+  "certificationSuggestions": ["AWS Certified Developer", "Meta Frontend Specialization"],
   "learningRoadmap": [
     {
-      "step": "Week 1-2",
-      "topic": "Docker & Container Basics",
-      "details": "Learn containerization, Dockerfiles, and multi-container docker-compose setups.",
-      "recommendedResource": "Official Docker Documentation & FreeCodeCamp"
-    },
-    {
-      "step": "Week 3-4",
-      "topic": "Cloud Deployment & AWS",
-      "details": "Deploy Node/React apps to AWS EC2, S3, and setup CloudFront CDN.",
-      "recommendedResource": "AWS Certified Cloud Practitioner Guide"
+      "step": "Week 1: Core Fundamentals",
+      "topic": "Topic Name",
+      "priority": "High",
+      "estimatedHours": 10,
+      "prerequisites": ["Basic JS"],
+      "details": "Explanation of topics to master",
+      "recommendedResource": "Official Documentation",
+      "weeklyPlan": ["Day 1: Theory", "Day 2: Coding Practice", "Day 3: Mini Project"]
     }
   ]
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
+      const text = await generateAiContentWithFallback(prompt);
+      if (text) {
+        const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+        const parsed = JSON.parse(cleaned);
 
-      const text = response.text || "";
-      const cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      const parsed = JSON.parse(cleaned);
-
-      return {
-        targetRole,
-        matchingScore: parsed.matchingScore || 75,
-        missingSkills: parsed.missingSkills || ["Docker", "Kubernetes", "AWS"],
-        missingTechnologies: parsed.missingTechnologies || ["Redis", "GraphQL"],
-        learningPriority: parsed.learningPriority || ["Containerization", "Cloud Architecture"],
-        learningRoadmap: parsed.learningRoadmap || [],
-      };
+        return {
+          targetRole: normalizedRole,
+          matchingScore: parsed.matchingScore || 70,
+          missingSkills: parsed.missingSkills || [],
+          missingTechnologies: parsed.missingTechnologies || [],
+          prioritySkills: parsed.prioritySkills || [],
+          recommendedProjects: parsed.recommendedProjects || [],
+          interviewTopics: parsed.interviewTopics || [],
+          certificationSuggestions: parsed.certificationSuggestions || [],
+          learningRoadmap: parsed.learningRoadmap || [],
+        };
+      }
     } catch (err) {
-      console.error("Gemini Skill Gap Analysis failed:", err);
+      console.error("AI Skill Gap Analysis error:", err);
     }
   }
 
-  // Heuristic Skill Gap Analysis Fallback
-  const missingTech = ["Docker & Containers", "AWS / Cloud Infrastructure", "CI/CD & GitHub Actions", "System Design & Microservices"];
-
+  // Dynamic Rule-Based Skill Gap Engine
   return {
-    targetRole: targetRole || "Full Stack Engineer",
-    matchingScore: Math.min(88, Math.max(50, 60 + resumeSkills.length * 3)),
-    missingSkills: missingTech.slice(0, 3),
-    missingTechnologies: ["Redis Cache", "GraphQL", "Kubernetes"],
-    learningPriority: [
-      "1. Master Docker Containerization",
-      "2. Learn AWS/Cloud App Deployment",
-      "3. Implement CI/CD Automated Pipelines",
+    targetRole: normalizedRole,
+    matchingScore: Math.min(95, Math.max(40, 45 + resumeSkills.length * 5)),
+    missingSkills: [`Advanced ${normalizedRole} Principles`, "Production Architecture"],
+    missingTechnologies: ["Docker", "AWS / Cloud Infrastructure"],
+    prioritySkills: [`Master ${normalizedRole} Core Stack`, "Build Capstone Project"],
+    recommendedProjects: [
+      {
+        title: `${normalizedRole} Production Platform`,
+        difficulty: "Intermediate",
+        description: `Build an end-to-end scalable application tailored for ${normalizedRole} requirements.`,
+        technologies: resumeSkills.slice(0, 3),
+      },
     ],
+    interviewTopics: [`${normalizedRole} Architecture`, "State & Performance Tuning", "Security Best Practices"],
+    certificationSuggestions: [`AWS Certified ${normalizedRole}`, "Professional Tech Certification"],
     learningRoadmap: [
       {
-        step: "Week 1: Containerization",
-        topic: "Docker Fundamentals",
-        details: "Build Docker images for Node.js backend and React frontend applications.",
-        recommendedResource: "Docker Mastery on Udemy / FreeCodeCamp Docker Tutorial",
-      },
-      {
-        step: "Week 2: Cloud Services",
-        topic: "AWS S3 & EC2 Deployment",
-        details: "Deploy full stack apps to AWS EC2 instance with NGINX reverse proxy.",
-        recommendedResource: "AWS Developer Guide",
-      },
-      {
-        step: "Week 3: CI/CD Automation",
-        topic: "GitHub Actions",
-        details: "Set up automated test and build workflows on every push to main.",
-        recommendedResource: "GitHub Actions Documentation",
+        step: "Week 1: Foundations",
+        topic: `${normalizedRole} Core Fundamentals`,
+        priority: "High",
+        estimatedHours: 12,
+        prerequisites: resumeSkills.slice(0, 2),
+        details: `Study core syntax, architecture patterns, and tools required for ${normalizedRole}.`,
+        recommendedResource: "Official Documentation & FreeCodeCamp",
+        weeklyPlan: ["Day 1-2: Core Concepts", "Day 3-4: Hands-on Code", "Day 5-7: Mini Project"],
       },
     ],
   };

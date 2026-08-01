@@ -10,6 +10,9 @@ import RegisterPage from "../pages/Register/RegisterPage";
 import DashboardPage from "../pages/Dashboard/DashboardPage";
 import ResumePage from "../pages/Resume/ResumePage";
 import AnalysisPage from "../pages/Analysis/AnalysisPage";
+import InterviewPage from "../pages/Interview/InterviewPage";
+import ProgressPage from "../pages/Progress/ProgressPage";
+import SettingsPage from "../pages/Settings/SettingsPage";
 
 import ProtectedRoute from "../components/auth/ProtectedRoute";
 
@@ -41,6 +44,18 @@ export const router = createBrowserRouter([
       {
         path: "/analysis",
         element: <AnalysisPage />,
+      },
+      {
+        path: "/interview",
+        element: <InterviewPage />,
+      },
+      {
+        path: "/progress",
+        element: <ProgressPage />,
+      },
+      {
+        path: "/settings",
+        element: <SettingsPage />,
       },
     ],
   },

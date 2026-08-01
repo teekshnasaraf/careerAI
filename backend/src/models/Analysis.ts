@@ -5,6 +5,13 @@ export interface IAnalysis extends Document {
   resumeId: mongoose.Types.ObjectId;
   resumeScore: number;
   atsScore: number;
+  sectionScores: {
+    summaryScore: number;
+    skillsScore: number;
+    experienceScore: number;
+    educationScore: number;
+    projectsScore: number;
+  };
   sectionAnalysis: {
     summary: string;
     skills: string;
@@ -16,18 +23,34 @@ export interface IAnalysis extends Document {
   weaknesses: string[];
   suggestions: string[];
   missingSkills: string[];
-  targetRole?: string;
+  recommendedKeywords: string[];
+  actionVerbs: string[];
+  formattingSuggestions: string[];
+  topPriorityImprovements: string[];
+  targetRole: string;
   skillGapAnalysis?: {
     targetRole: string;
     matchingScore: number;
     missingSkills: string[];
     missingTechnologies: string[];
-    learningPriority: string[];
+    prioritySkills: string[];
+    recommendedProjects: Array<{
+      title: string;
+      difficulty: string;
+      description: string;
+      technologies: string[];
+    }>;
+    interviewTopics: string[];
+    certificationSuggestions: string[];
     learningRoadmap: Array<{
       step: string;
       topic: string;
+      priority: string;
+      estimatedHours: number;
+      prerequisites: string[];
       details: string;
       recommendedResource: string;
+      weeklyPlan: string[];
     }>;
   };
   createdAt: Date;
@@ -49,14 +72,15 @@ const analysisSchema = new Schema<IAnalysis>(
       required: true,
     },
 
-    resumeScore: {
-      type: Number,
-      required: true,
-    },
+    resumeScore: { type: Number, required: true },
+    atsScore: { type: Number, required: true },
 
-    atsScore: {
-      type: Number,
-      required: true,
+    sectionScores: {
+      summaryScore: { type: Number, default: 75 },
+      skillsScore: { type: Number, default: 70 },
+      experienceScore: { type: Number, default: 70 },
+      educationScore: { type: Number, default: 85 },
+      projectsScore: { type: Number, default: 80 },
     },
 
     sectionAnalysis: {
@@ -71,6 +95,10 @@ const analysisSchema = new Schema<IAnalysis>(
     weaknesses: { type: [String], default: [] },
     suggestions: { type: [String], default: [] },
     missingSkills: { type: [String], default: [] },
+    recommendedKeywords: { type: [String], default: [] },
+    actionVerbs: { type: [String], default: [] },
+    formattingSuggestions: { type: [String], default: [] },
+    topPriorityImprovements: { type: [String], default: [] },
 
     targetRole: { type: String, default: "Full Stack Engineer" },
 
@@ -79,13 +107,27 @@ const analysisSchema = new Schema<IAnalysis>(
       matchingScore: Number,
       missingSkills: [String],
       missingTechnologies: [String],
-      learningPriority: [String],
+      prioritySkills: [String],
+      recommendedProjects: [
+        {
+          title: String,
+          difficulty: String,
+          description: String,
+          technologies: [String],
+        },
+      ],
+      interviewTopics: [String],
+      certificationSuggestions: [String],
       learningRoadmap: [
         {
           step: String,
           topic: String,
+          priority: String,
+          estimatedHours: Number,
+          prerequisites: [String],
           details: String,
           recommendedResource: String,
+          weeklyPlan: [String],
         },
       ],
     },
