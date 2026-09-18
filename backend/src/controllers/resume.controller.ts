@@ -10,6 +10,7 @@ import {
   ResumeParserError,
   type ResumeSections,
 } from "../services/resumeDocumentParser.service";
+import { extractSkills, type ExtractedSkill } from "../services/skillExtractor.service";
 import { generateResumeAnalysis } from "../services/ai.service";
 
 export const uploadResume = async (
@@ -48,11 +49,13 @@ export const uploadResume = async (
     let extractedText = "";
     let cleanedText = "";
     let sections: ResumeSections | undefined;
+    let extractedSkills: ExtractedSkill[] = [];
     try {
       const parsedDocument = await parseResumeDocument(tempFilePath, mimetype);
       extractedText = parsedDocument.rawText;
       cleanedText = parsedDocument.cleanedText;
       sections = parsedDocument.sections;
+      extractedSkills = extractSkills({ cleanedText, sections }).skills;
       // Preserve the legacy ATS/Gemini parser input; cleaned text is stored for
       // the new deterministic parsing pipeline and future consumers.
       parsedResult = parseResumeText(extractedText);
@@ -113,6 +116,7 @@ export const uploadResume = async (
       existingResume.rawText = extractedText;
       existingResume.cleanedText = cleanedText;
       existingResume.sections = sections;
+      existingResume.extractedSkills = extractedSkills;
       existingResume.status = "parsed";
       existingResume.atsScore = aiResult.atsScore;
       existingResume.parsedData = {
@@ -140,6 +144,7 @@ export const uploadResume = async (
         rawText: extractedText,
         cleanedText,
         sections,
+        extractedSkills,
         status: "parsed",
         atsScore: aiResult.atsScore,
         parsedData: {

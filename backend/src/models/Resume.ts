@@ -15,6 +15,18 @@ export interface AtsBreakdown {
   impactMetricsScore: number;
 }
 
+export interface ExtractedSkill {
+  name: string;
+  category: string;
+  kind: string;
+  weight: number;
+  occurrences: number;
+  sections: string[];
+  matchedTexts: string[];
+  rankingScore: number;
+  rank: number;
+}
+
 export interface IResume extends Document {
   user: mongoose.Types.ObjectId;
   originalName: string;
@@ -37,6 +49,7 @@ export interface IResume extends Document {
     publications: string;
     extracurricular: string;
   };
+  extractedSkills?: ExtractedSkill[];
   atsScore?: number;
   status: "uploaded" | "processing" | "parsed" | "failed";
   parsedData?: {
@@ -135,6 +148,18 @@ const resumeSchema = new Schema<IResume>(
       publications: { type: String, default: "" },
       extracurricular: { type: String, default: "" },
     },
+
+    extractedSkills: [{
+      name: String,
+      category: String,
+      kind: String,
+      weight: Number,
+      occurrences: Number,
+      sections: [String],
+      matchedTexts: [String],
+      rankingScore: Number,
+      rank: Number,
+    }],
 
     atsScore: {
       type: Number,
