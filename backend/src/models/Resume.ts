@@ -27,6 +27,14 @@ export interface ExtractedSkill {
   rank: number;
 }
 
+export interface DeterministicScore {
+  overall: number;
+  subscores: { skillCoverage: number; skillEvidence: number; sectionCompleteness: number; projectEvidence: number; experienceEvidence: number; structuralChecks: number; };
+  skillContributions: Array<{ name: string; category: string; weight: number; occurrences: number; sections: string[]; coverageContribution: number; repeatedEvidence: boolean; demonstratedEvidence: boolean; }>;
+  strengths: string[];
+  weaknesses: string[];
+}
+
 export interface IResume extends Document {
   user: mongoose.Types.ObjectId;
   originalName: string;
@@ -50,6 +58,7 @@ export interface IResume extends Document {
     extracurricular: string;
   };
   extractedSkills?: ExtractedSkill[];
+  deterministicScore?: DeterministicScore;
   atsScore?: number;
   status: "uploaded" | "processing" | "parsed" | "failed";
   parsedData?: {
@@ -160,6 +169,14 @@ const resumeSchema = new Schema<IResume>(
       rankingScore: Number,
       rank: Number,
     }],
+
+    deterministicScore: {
+      overall: Number,
+      subscores: { skillCoverage: Number, skillEvidence: Number, sectionCompleteness: Number, projectEvidence: Number, experienceEvidence: Number, structuralChecks: Number },
+      skillContributions: [{ name: String, category: String, weight: Number, occurrences: Number, sections: [String], coverageContribution: Number, repeatedEvidence: Boolean, demonstratedEvidence: Boolean }],
+      strengths: [String],
+      weaknesses: [String],
+    },
 
     atsScore: {
       type: Number,
