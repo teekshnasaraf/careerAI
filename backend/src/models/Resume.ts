@@ -24,6 +24,19 @@ export interface IResume extends Document {
   fileSize: number;
   mimeType: string;
   rawText?: string;
+  cleanedText?: string;
+  sections?: {
+    summary: string;
+    education: string;
+    skills: string;
+    experience: string;
+    projects: string;
+    certifications: string;
+    achievements: string;
+    internships: string;
+    publications: string;
+    extracurricular: string;
+  };
   atsScore?: number;
   status: "uploaded" | "processing" | "parsed" | "failed";
   parsedData?: {
@@ -103,6 +116,24 @@ const resumeSchema = new Schema<IResume>(
     rawText: {
       type: String,
       default: "",
+    },
+
+    cleanedText: {
+      type: String,
+      default: "",
+    },
+
+    sections: {
+      summary: { type: String, default: "" },
+      education: { type: String, default: "" },
+      skills: { type: String, default: "" },
+      experience: { type: String, default: "" },
+      projects: { type: String, default: "" },
+      certifications: { type: String, default: "" },
+      achievements: { type: String, default: "" },
+      internships: { type: String, default: "" },
+      publications: { type: String, default: "" },
+      extracurricular: { type: String, default: "" },
     },
 
     atsScore: {

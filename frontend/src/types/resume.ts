@@ -48,6 +48,20 @@ export interface ResumeData {
   publicId?: string;
   fileSize: number;
   mimeType: string;
+  rawText?: string;
+  cleanedText?: string;
+  sections?: {
+    summary: string;
+    education: string;
+    skills: string;
+    experience: string;
+    projects: string;
+    certifications: string;
+    achievements: string;
+    internships: string;
+    publications: string;
+    extracurricular: string;
+  };
   atsScore?: number;
   status: "uploaded" | "processing" | "parsed" | "failed";
   parsedData?: {

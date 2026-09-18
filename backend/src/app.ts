@@ -1,7 +1,8 @@
-import express from "express";
+import express, { NextFunction, Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import pinoHttp from "pino-http";
+import multer from "multer";
 
 import path from "path";
 
@@ -40,6 +41,28 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/interview", interviewRoutes);
 app.use("/api/progress", progressRoutes);
 app.use("/api/settings", settingsRoutes);
+
+// Keep upload validation errors JSON-shaped for the frontend. Other errors remain
+// generic so internal implementation details are never exposed to clients.
+app.use((error: Error, _req: Request, res: Response, _next: NextFunction) => {
+  if (error instanceof multer.MulterError) {
+    const isTooLarge = error.code === "LIMIT_FILE_SIZE";
+    res.status(isTooLarge ? 413 : 400).json({
+      success: false,
+      message: isTooLarge
+        ? "Resume file is too large. Maximum allowed size is 5 MB."
+        : "The resume upload is invalid.",
+    });
+    return;
+  }
+
+  if (error.message === "Invalid file type. Only PDF and DOCX files are allowed.") {
+    res.status(415).json({ success: false, message: error.message });
+    return;
+  }
+
+  res.status(500).json({ success: false, message: "Server error processing request" });
+});
 
 // Health Check
 app.get("/", (_req, res) => {

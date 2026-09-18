@@ -26,7 +26,7 @@ function ResumeUploadCard({ onUploadSuccess }: ResumeUploadCardProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
-  const ALLOWED_EXTENSIONS = ["pdf", "doc", "docx"];
+  const ALLOWED_EXTENSIONS = ["pdf", "docx"];
 
   const validateAndUploadFile = async (file: File) => {
     setErrorMessage(null);
@@ -34,7 +34,7 @@ function ResumeUploadCard({ onUploadSuccess }: ResumeUploadCardProps) {
 
     const extension = file.name.split(".").pop()?.toLowerCase();
     if (!extension || !ALLOWED_EXTENSIONS.includes(extension)) {
-      setErrorMessage("Unsupported file format. Please upload a PDF, DOC, or DOCX file.");
+      setErrorMessage("Unsupported file format. Please upload a PDF or DOCX file.");
       return;
     }
 
@@ -133,7 +133,7 @@ function ResumeUploadCard({ onUploadSuccess }: ResumeUploadCardProps) {
       <input
         ref={fileInputRef}
         type="file"
-        accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         onChange={handleFileSelect}
         className="hidden"
         id="resume-file-input"
@@ -197,7 +197,7 @@ function ResumeUploadCard({ onUploadSuccess }: ResumeUploadCardProps) {
           {/* Helper Text */}
           <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-xs font-medium text-gray-400">
             <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-600">
-              Supported formats: PDF, DOC, DOCX
+              Supported formats: PDF, DOCX
             </span>
             <span className="rounded-full bg-gray-100 px-3 py-1 text-gray-600">
               Maximum size: 5 MB

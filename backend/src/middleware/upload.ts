@@ -26,7 +26,7 @@ const fileFilter = (
   file: Express.Multer.File,
   cb: FileFilterCallback
 ) => {
-  const allowedExtensions = [".pdf", ".doc", ".docx"];
+  const allowedExtensions = [".pdf", ".docx"];
   const ext = path.extname(file.originalname).toLowerCase();
 
   const allowedMimeTypes = [
@@ -35,10 +35,10 @@ const fileFilter = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   ];
 
-  if (allowedExtensions.includes(ext) || allowedMimeTypes.includes(file.mimetype)) {
+  if (allowedExtensions.includes(ext) && (allowedMimeTypes.includes(file.mimetype) || file.mimetype === "application/octet-stream")) {
     cb(null, true);
   } else {
-    cb(new Error("Invalid file type. Only PDF, DOC, and DOCX files are allowed."));
+    cb(new Error("Invalid file type. Only PDF and DOCX files are allowed."));
   }
 };
 

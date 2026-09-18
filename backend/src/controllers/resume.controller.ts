@@ -4,7 +4,12 @@ import path from "path";
 import Resume from "../models/Resume";
 import User from "../models/User";
 import { uploadToCloudinary, deleteFromCloudinary } from "../config/cloudinary";
-import { buildResumeAnalysisPayload, extractTextFromFile, parseResumeText } from "../services/resumeParser.service";
+import { parseResumeText } from "../services/resumeParser.service";
+import {
+  parseResumeDocument,
+  ResumeParserError,
+  type ResumeSections,
+} from "../services/resumeDocumentParser.service";
 import { generateResumeAnalysis } from "../services/ai.service";
 
 export const uploadResume = async (
@@ -22,7 +27,7 @@ export const uploadResume = async (
 
     const { originalname, filename, size, mimetype, path: tempFilePath } = req.file;
 
-    // 1. Extract raw text & parse sections from document BEFORE cloud upload deletes temp file
+    // 1. Extract and structure resume content before cloud upload removes the temp file.
     let parsedResult: any = {
       summary: "",
       skills: [],
@@ -41,13 +46,33 @@ export const uploadResume = async (
     };
 
     let extractedText = "";
+    let cleanedText = "";
+    let sections: ResumeSections | undefined;
     try {
-      extractedText = await extractTextFromFile(tempFilePath, mimetype);
-      if (extractedText && extractedText.trim().length > 5) {
-        parsedResult = parseResumeText(extractedText);
+      const parsedDocument = await parseResumeDocument(tempFilePath, mimetype);
+      extractedText = parsedDocument.rawText;
+      cleanedText = parsedDocument.cleanedText;
+      sections = parsedDocument.sections;
+      // Preserve the legacy ATS/Gemini parser input; cleaned text is stored for
+      // the new deterministic parsing pipeline and future consumers.
+      parsedResult = parseResumeText(extractedText);
+    } catch (parseError) {
+      if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+
+      if (parseError instanceof ResumeParserError) {
+        res.status(parseError.statusCode).json({
+          success: false,
+          message: parseError.message,
+        });
+        return;
       }
-    } catch (parseErr) {
-      console.error("Resume parsing error:", parseErr);
+
+      console.error("Resume parsing error:", parseError);
+      res.status(422).json({
+        success: false,
+        message: "The uploaded resume could not be parsed.",
+      });
+      return;
     }
 
     // 2. Upload file to Cloudinary & remove temporary file
@@ -86,6 +111,8 @@ export const uploadResume = async (
       existingResume.fileSize = size;
       existingResume.mimeType = mimetype;
       existingResume.rawText = extractedText;
+      existingResume.cleanedText = cleanedText;
+      existingResume.sections = sections;
       existingResume.status = "parsed";
       existingResume.atsScore = aiResult.atsScore;
       existingResume.parsedData = {
@@ -111,6 +138,8 @@ export const uploadResume = async (
         fileSize: size,
         mimeType: mimetype,
         rawText: extractedText,
+        cleanedText,
+        sections,
         status: "parsed",
         atsScore: aiResult.atsScore,
         parsedData: {
