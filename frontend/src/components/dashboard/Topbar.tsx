@@ -1,6 +1,6 @@
-import { Bell } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../context/useAuth";
+import ProfileNotification from "./ProfileNotification";
 
 function Topbar() {
   const { user } = useAuth();
@@ -18,11 +18,7 @@ function Topbar() {
       </div>
 
       <div className="flex items-center gap-6">
-        <button className="relative rounded-full p-2 transition hover:bg-gray-100">
-          <Bell size={22} />
-
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-red-500"></span>
-        </button>
+        <ProfileNotification />
 
         <Link
           to="/settings"
@@ -48,4 +44,4 @@ function Topbar() {
   );
 }
 
-export default Topbar;
+export default Topbar;

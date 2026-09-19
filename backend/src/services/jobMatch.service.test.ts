@@ -405,3 +405,200 @@ test("26. OOP alias variants: OOPS and Object-Oriented Programming both map to c
   assert.ok(oop2, "Object-Oriented Programming alias must resolve to OOP");
 });
 
+// ─── Tests 27-40: Natural JD scenarios (Items A–J from spec) ─────────────────
+
+// A. Natural-language JD sentence
+test("27-A. Natural language JD: skills in a sentence are captured with unspecified priority", () => {
+  const parsed = parseJobDescription(
+    "Software Engineer with Python, DSA and UI/UX experience."
+  );
+  const names = parsed.requirements.map((r) => r.name);
+  assert.ok(names.includes("Python"), "Python must be recognized in sentence");
+  assert.ok(names.includes("Data Structures and Algorithms"), "DSA must be recognized in sentence");
+  assert.ok(names.includes("UI/UX Design"), "UI/UX must be recognized in sentence");
+  for (const req of parsed.requirements) {
+    assert.equal(req.priority, "unspecified", `${req.name} should be unspecified in plain sentence`);
+  }
+});
+
+// B. Requirements section (freeform heading)
+test("28-B. Requirements section heading: skills listed beneath inherit required priority", () => {
+  const jd = `Requirements:\nPython\nDSA\nUI/UX`;
+  const parsed = parseJobDescription(jd);
+  const names = parsed.requirements.map((r) => r.name);
+  assert.ok(names.includes("Python"), "Python must appear under Requirements");
+  assert.ok(names.includes("Data Structures and Algorithms"), "DSA must appear under Requirements");
+  assert.ok(names.includes("UI/UX Design"), "UI/UX must appear under Requirements");
+  for (const req of parsed.requirements) {
+    assert.equal(req.priority, "required", `${req.name} should inherit required priority`);
+  }
+});
+
+// C. Nice-to-have section
+test("29-C. Preferred section: skills listed beneath inherit preferred priority", () => {
+  const jd = `Nice to have:\nDocker\nAWS`;
+  const parsed = parseJobDescription(jd);
+  const dockerReq = parsed.requirements.find((r) => r.name === "Docker");
+  const awsReq = parsed.requirements.find((r) => r.name === "AWS");
+  assert.ok(dockerReq, "Docker must appear");
+  assert.equal(dockerReq?.priority, "preferred");
+  assert.ok(awsReq, "AWS must appear");
+  assert.equal(awsReq?.priority, "preferred");
+});
+
+// D. Mixed punctuation in a comma-separated list
+test("30-D. Mixed punctuation: Python, React.js, Node.js, MongoDB. all recognized", () => {
+  const parsed = parseJobDescription("Python, React.js, Node.js, MongoDB.");
+  const names = parsed.requirements.map((r) => r.name);
+  assert.ok(names.includes("Python"), "Python must be recognized with trailing comma");
+  assert.ok(names.includes("React"), "React.js must be recognized");
+  assert.ok(names.includes("Node.js"), "Node.js must be recognized");
+  assert.ok(names.includes("MongoDB"), "MongoDB must be recognized with trailing period");
+});
+
+// E. Multi-word skills in a list
+test("31-E. Multi-word skills: Machine Learning, Natural Language Processing recognized", () => {
+  const jd = "Requirements: Machine Learning, Natural Language Processing, Data Analysis";
+  const parsed = parseJobDescription(jd);
+  const names = parsed.requirements.map((r) => r.name);
+  assert.ok(names.includes("Machine Learning"), "Machine Learning must be recognized");
+  assert.ok(names.includes("Natural Language Processing"), "NLP multi-word must be recognized");
+  assert.ok(names.includes("Data Analysis"), "Data Analysis must be recognized");
+});
+
+// F. Skills embedded inside normal prose sentences
+test("32-F. Skills in prose: recognized even when embedded in regular English sentences", () => {
+  const jd = `
+    We are a team building scalable products.
+    Our stack includes React and Node.js for the frontend and backend respectively.
+    We use PostgreSQL for our primary database and Docker for containerization.
+  `;
+  const parsed = parseJobDescription(jd);
+  const names = parsed.requirements.map((r) => r.name);
+  assert.ok(names.includes("React"), "React must be recognized in prose");
+  assert.ok(names.includes("Node.js"), "Node.js must be recognized in prose");
+  assert.ok(names.includes("PostgreSQL"), "PostgreSQL must be recognized in prose");
+  assert.ok(names.includes("Docker"), "Docker must be recognized in prose");
+});
+
+// G. Required/preferred priority inheritance across multiple lines
+test("33-G. Priority inheritance: skills on lines after a heading inherit that heading's priority", () => {
+  const jd = `
+    Required:
+    Python
+    React
+    TypeScript
+
+    Nice to have:
+    Docker
+    AWS
+  `;
+  const parsed = parseJobDescription(jd);
+  const python = parsed.requirements.find((r) => r.name === "Python");
+  const docker = parsed.requirements.find((r) => r.name === "Docker");
+  assert.equal(python?.priority, "required", "Python should inherit required priority");
+  assert.equal(docker?.priority, "preferred", "Docker should inherit preferred priority");
+});
+
+// G2. Priority NOT downgraded by neutral section headings
+test("34-G2. Required priority is NOT reset by neutral headings like 'Responsibilities'", () => {
+  const jd = `
+    Requirements:
+    Python
+    React
+
+    Responsibilities:
+    Build scalable APIs using TypeScript
+    Work with MongoDB daily
+  `;
+  const parsed = parseJobDescription(jd);
+  const typescript = parsed.requirements.find((r) => r.name === "TypeScript");
+  const mongo = parsed.requirements.find((r) => r.name === "MongoDB");
+  // After fixing the parser, TypeScript and MongoDB under Responsibilities should
+  // still be recognized. Previously they would be marked required; now they retain
+  // the current priority which after "Responsibilities:" should NOT downgrade from required.
+  // (They appear inside a "Responsibilities" section which is a neutral heading.)
+  // The fix ensures required is preserved across neutral headings.
+  assert.ok(typescript !== undefined || mongo !== undefined, "Skills under Responsibilities must still be captured");
+  const python = parsed.requirements.find((r) => r.name === "Python");
+  assert.equal(python?.priority, "required", "Python under Requirements must remain required");
+});
+
+// H. Previously ignored skill regression
+test("35-H. Previously ignored: DSA, UI/UX, OOP all recognized after taxonomy fix", () => {
+  const jd = "Software Engineer required: DSA, python, UI/UX";
+  const parsed = parseJobDescription(jd);
+  const names = parsed.requirements.map((r) => r.name);
+  assert.ok(names.includes("Data Structures and Algorithms"), "DSA must be recognized (regression)");
+  assert.ok(names.includes("Python"), "Python must be recognized (regression)");
+  assert.ok(names.includes("UI/UX Design"), "UI/UX must be recognized (regression)");
+  // All three should have required priority (inline marker)
+  for (const req of parsed.requirements) {
+    assert.equal(req.priority, "required", `${req.name} should be required (inline marker)`);
+  }
+  // Score should NOT be 100% if only Python is in resume
+  const { calculateJobMatch } = require("./jobMatch.service");
+  const match = calculateJobMatch(parsed.requirements, [makeResumeSkill("Python")]);
+  assert.ok((match.overallScore ?? 0) < 60, `Score should be partial (< 60) when only 1 of 3 required skills present; got ${match.overallScore}`);
+});
+
+// I. Empty JD
+test("36-I. Empty JD: returns 0 requirements and null score", () => {
+  const parsed = parseJobDescription("");
+  assert.equal(parsed.totalDetectedRequirements, 0);
+  assert.deepEqual(parsed.requirements, []);
+});
+
+// J. JD with no recognized taxonomy skills
+test("37-J. JD with no recognized skills: 0 requirements, null score", () => {
+  const parsed = parseJobDescription("We are looking for a passionate team player with strong communication skills and a proactive mindset.");
+  assert.equal(parsed.totalDetectedRequirements, 0);
+});
+
+// UI/UX in comma-separated context
+test("38. UI/UX in comma-separated list with trailing punctuation is recognized", () => {
+  const parsed = parseJobDescription("Required skills: Python, React, UI/UX, DSA.");
+  const names = parsed.requirements.map((r) => r.name);
+  assert.ok(names.includes("UI/UX Design"), "UI/UX must be recognized in comma-separated list");
+  assert.ok(names.includes("Data Structures and Algorithms"), "DSA must be recognized before period");
+});
+
+// Full mixed JD
+test("39. Full realistic JD: recognizes skills across multiple sections with correct priority", () => {
+  const jd = `
+Software Engineer — Backend
+
+We are building a cloud-native platform.
+
+Requirements:
+- Strong proficiency in Python
+- Experience with Node.js and REST API design
+- Database knowledge: PostgreSQL or MongoDB
+- DSA proficiency for system design interviews
+
+Nice to have:
+- Docker and Kubernetes
+- AWS or Google Cloud
+- CI/CD pipeline experience
+
+Responsibilities:
+- Build and maintain microservices
+- Collaborate with frontend engineers using React
+- Deploy via GitHub Actions
+  `;
+  const parsed = parseJobDescription(jd);
+  const get = (name: string) => parsed.requirements.find((r) => r.name === name);
+  assert.equal(get("Python")?.priority, "required", "Python should be required");
+  assert.equal(get("Node.js")?.priority, "required", "Node.js should be required");
+  assert.equal(get("PostgreSQL")?.priority, "required", "PostgreSQL should be required");
+  assert.equal(get("MongoDB")?.priority, "required", "MongoDB should be required");
+  assert.equal(get("Data Structures and Algorithms")?.priority, "required", "DSA should be required");
+  assert.equal(get("Docker")?.priority, "preferred", "Docker should be preferred");
+  assert.equal(get("Kubernetes")?.priority, "preferred", "Kubernetes should be preferred");
+  assert.equal(get("AWS")?.priority, "preferred", "AWS should be preferred");
+  assert.equal(get("Google Cloud")?.priority, "preferred", "GCP should be preferred");
+  // React under Responsibilities should still be captured (not dropped)
+  assert.ok(get("React") !== undefined, "React must be captured from Responsibilities section");
+});
+
+

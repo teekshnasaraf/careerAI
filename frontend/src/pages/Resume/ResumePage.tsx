@@ -721,7 +721,7 @@ function ResumePage() {
                     <div>
                       <h3 className="text-lg font-bold text-gray-900">Job Description Skill Match</h3>
                       <p className="mt-1 text-xs text-gray-500">
-                        Paste a job posting below to deterministically compare required vs preferred skills, detect gaps, and get your match score.
+                        Paste a complete job posting below. The parser automatically detects required vs. preferred skills from the JD context — no manual formatting required.
                       </p>
                     </div>
                     <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
@@ -729,12 +729,25 @@ function ResumePage() {
                     </span>
                   </div>
 
-                  <textarea
-                    rows={6}
+                <textarea
+                    rows={8}
                     value={jobDescriptionInput}
                     onChange={(e) => setJobDescriptionInput(e.target.value)}
-                    placeholder="Paste job description text here... (e.g. 'Required: React, Node.js, SQL. Preferred: AWS, Docker')"
-                    className="w-full rounded-xl border border-gray-200 p-4 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 font-mono"
+                    placeholder={`Paste the full job description here — no special formatting needed.
+
+Example:
+  Software Engineer
+  We are looking for candidates with Python, React and DSA experience.
+
+  Requirements:
+  - Python
+  - React
+  - DSA
+
+  Nice to have:
+  - Docker
+  - AWS`}
+                    className="w-full rounded-xl border border-gray-200 p-4 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400"
                   />
 
                   {jobMatchError && (
