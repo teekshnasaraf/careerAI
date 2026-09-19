@@ -9,12 +9,14 @@ export interface ParsedEducation {
   degree: string;
   institution: string;
   year: string;
+  score?: string;
 }
 
 export interface ParsedProject {
   title: string;
   description: string;
   technologies?: string[];
+  links?: string[];
 }
 
 export interface SectionChecklistItem {
@@ -70,6 +72,8 @@ export interface ResumeData {
     experience?: ParsedExperience[];
     education?: ParsedEducation[];
     projects?: ParsedProject[];
+    extracurricular?: string;
+    achievements?: string;
   };
   sectionChecklist?: SectionChecklistItem[];
   atsBreakdown?: AtsBreakdown;

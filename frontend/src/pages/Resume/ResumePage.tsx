@@ -19,10 +19,12 @@ import {
   Check,
   X,
   ArrowRight,
+  Target,
 } from "lucide-react";
 
 import ResumeUploadCard, { formatFileSize } from "../../components/resume/ResumeUploadCard";
 import { getLatestResumeApi, deleteResumeApi } from "../../features/resume/resume.service";
+import { matchJobDescriptionApi, type JobMatchResult } from "../../features/jobs/jobs.service";
 import type { ResumeData } from "../../types/resume";
 import axios from "axios";
 
@@ -31,8 +33,14 @@ function ResumePage() {
   const [loading, setLoading] = useState(true);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showReplaceModal, setShowReplaceModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<"ats_insights" | "overview" | "experience" | "education" | "projects">("ats_insights");
+  const [activeTab, setActiveTab] = useState<"ats_insights" | "overview" | "experience" | "education" | "projects" | "job_match">("ats_insights");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Job Match State
+  const [jobDescriptionInput, setJobDescriptionInput] = useState<string>("");
+  const [matchingJob, setMatchingJob] = useState(false);
+  const [jobMatchResult, setJobMatchResult] = useState<JobMatchResult | null>(null);
+  const [jobMatchError, setJobMatchError] = useState<string | null>(null);
 
   const fetchResume = async () => {
     try {
@@ -99,6 +107,32 @@ function ResumePage() {
       alert("Failed to delete resume. Please try again.");
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleMatchJob = async () => {
+    if (!jobDescriptionInput.trim()) {
+      setJobMatchError("Please enter a job description to match against.");
+      return;
+    }
+    try {
+      setMatchingJob(true);
+      setJobMatchError(null);
+      const res = await matchJobDescriptionApi(jobDescriptionInput, resume?._id);
+      if (res.success && res.match) {
+        setJobMatchResult(res.match);
+      } else {
+        setJobMatchError(res.message || "Failed to calculate job match.");
+      }
+    } catch (err: unknown) {
+      console.error("Job match error:", err);
+      if (axios.isAxiosError(err)) {
+        setJobMatchError(err.response?.data?.message || "Failed to calculate job match.");
+      } else {
+        setJobMatchError("Failed to calculate job match.");
+      }
+    } finally {
+      setMatchingJob(false);
     }
   };
 
@@ -312,6 +346,17 @@ function ResumePage() {
                 <FolderGit2 size={16} />
                 Projects ({resume.parsedData?.projects?.length || 0})
               </button>
+              <button
+                onClick={() => setActiveTab("job_match")}
+                className={`pb-4 px-5 text-sm font-semibold transition border-b-2 flex items-center gap-2 ${
+                  activeTab === "job_match"
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                <Target size={16} />
+                Job Description Match
+              </button>
             </div>
 
             {/* TAB 1: Elaborate ATS Insights */}
@@ -481,9 +526,21 @@ function ResumePage() {
               <div className="space-y-6">
                 <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
                   <h3 className="text-base font-bold text-gray-900">Extracted Summary / Profile</h3>
-                  <p className="mt-3 text-sm leading-relaxed text-gray-600">
-                    {resume.parsedData?.summary || "No professional summary header detected in your resume text."}
-                  </p>
+                  {resume.parsedData?.summary ? (
+                    <p className="mt-3 text-sm leading-relaxed text-gray-600">
+                      {resume.parsedData.summary}
+                    </p>
+                  ) : (
+                    <div className="mt-3 flex items-start gap-3 rounded-xl bg-amber-50 border border-amber-100 p-4">
+                      <AlertTriangle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-semibold text-amber-900">No professional summary section detected</p>
+                        <p className="mt-1 text-xs text-amber-700 leading-relaxed">
+                          Add a section titled <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-900">Summary</code> or <code className="bg-amber-100 px-1.5 py-0.5 rounded text-amber-900">Profile</code> with 2–4 sentences about your background to improve ATS score.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
@@ -510,6 +567,25 @@ function ResumePage() {
                     </div>
                   )}
                 </div>
+
+                {/* Extracurricular & Achievements — shown when content was detected */}
+                {(resume.parsedData?.extracurricular || resume.parsedData?.achievements) && (
+                  <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
+                    <h3 className="text-base font-bold text-gray-900">Activities &amp; Achievements</h3>
+                    {resume.parsedData.extracurricular && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Extracurricular / Leadership</p>
+                        <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{resume.parsedData.extracurricular}</p>
+                      </div>
+                    )}
+                    {resume.parsedData.achievements && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Achievements / Awards</p>
+                        <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">{resume.parsedData.achievements}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -568,10 +644,19 @@ function ResumePage() {
                           <GraduationCap className="h-5 w-5 text-blue-600" />
                           <h4 className="font-bold text-gray-900 text-sm">{edu.degree}</h4>
                         </div>
-                        <p className="text-xs text-gray-500">{edu.institution}</p>
-                        <span className="inline-block text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full">
-                          Year: {edu.year}
-                        </span>
+                        {edu.institution && (
+                          <p className="text-xs text-gray-500">{edu.institution}</p>
+                        )}
+                        {edu.year && (
+                          <span className="inline-block text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full">
+                            {/[-–—]/.test(edu.year) ? "Period" : "Year"}: {edu.year}
+                          </span>
+                        )}
+                        {edu.score && (
+                          <span className="inline-block text-xs font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full ml-1.5">
+                            {edu.score}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -602,11 +687,276 @@ function ResumePage() {
                             ))}
                           </div>
                         )}
+                        {proj.links && proj.links.length > 0 && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {proj.links.map((link, linkIdx) => (
+                              <a
+                                key={linkIdx}
+                                href={link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 border border-blue-100 hover:bg-blue-100 transition"
+                              >
+                                <ExternalLink size={11} />
+                                {link.replace(/^https?:\/\//, "").slice(0, 45)}{link.length > 50 ? "…" : ""}
+                              </a>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500">No Project entries detected in document text.</p>
+                )}
+              </div>
+            )}
+
+            {/* TAB 6: Job Description Match */}
+            {activeTab === "job_match" && (
+              <div className="space-y-8">
+                {/* Input Card */}
+                <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">Job Description Skill Match</h3>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Paste a job posting below to deterministically compare required vs preferred skills, detect gaps, and get your match score.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                      Step 4 Deterministic Engine
+                    </span>
+                  </div>
+
+                  <textarea
+                    rows={6}
+                    value={jobDescriptionInput}
+                    onChange={(e) => setJobDescriptionInput(e.target.value)}
+                    placeholder="Paste job description text here... (e.g. 'Required: React, Node.js, SQL. Preferred: AWS, Docker')"
+                    className="w-full rounded-xl border border-gray-200 p-4 text-sm text-gray-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder:text-gray-400 font-mono"
+                  />
+
+                  {jobMatchError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700">
+                      {jobMatchError}
+                    </div>
+                  )}
+
+                  <div className="flex justify-end">
+                    <button
+                      onClick={handleMatchJob}
+                      disabled={matchingJob}
+                      className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition hover:bg-blue-700 disabled:opacity-50 active:scale-95"
+                    >
+                      {matchingJob ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Matching Skills...
+                        </>
+                      ) : (
+                        <>
+                          <Target size={16} />
+                          Analyze Job Match
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Match Results Display */}
+                {jobMatchResult && (
+                  <div className="space-y-6">
+                    {/* Score Overview */}
+                    <div className="grid gap-6 md:grid-cols-3">
+                      <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/80 to-white p-6 shadow-sm">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Job Match Score</span>
+                        <div className="mt-4 flex items-baseline gap-2">
+                          {jobMatchResult.overallScore !== null ? (
+                            <>
+                              <span className="text-4xl font-extrabold text-blue-600">{jobMatchResult.overallScore}%</span>
+                              <span
+                                className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                                  jobMatchResult.overallScore >= 75
+                                    ? "text-emerald-700 bg-emerald-100"
+                                    : jobMatchResult.overallScore >= 50
+                                    ? "text-amber-700 bg-amber-100"
+                                    : "text-red-700 bg-red-100"
+                                }`}
+                              >
+                                {jobMatchResult.overallScore >= 75
+                                  ? "Strong Match"
+                                  : jobMatchResult.overallScore >= 50
+                                  ? "Moderate Match"
+                                  : "Low Match"}
+                              </span>
+                            </>
+                          ) : (
+                            <span className="text-xl font-bold text-gray-400">No Score</span>
+                          )}
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500">
+                          {jobMatchResult.scoreExplanation || "Weighted by Required (1.0), Preferred (0.5), Unspecified (0.75)"}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Required Skills</span>
+                        <div className="mt-4 flex items-baseline gap-3">
+                          <span className="text-3xl font-bold text-emerald-600">{jobMatchResult.matchedRequired.length}</span>
+                          <span className="text-sm font-semibold text-gray-400">matched</span>
+                          <span className="text-3xl font-bold text-red-500 ml-2">{jobMatchResult.missingRequired.length}</span>
+                          <span className="text-sm font-semibold text-gray-400">missing</span>
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500">Weight: 1.0 each</p>
+                      </div>
+
+                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Preferred Skills</span>
+                        <div className="mt-4 flex items-baseline gap-3">
+                          <span className="text-3xl font-bold text-blue-600">{jobMatchResult.matchedPreferred.length}</span>
+                          <span className="text-sm font-semibold text-gray-400">matched</span>
+                          <span className="text-3xl font-bold text-gray-500 ml-2">{jobMatchResult.missingPreferred.length}</span>
+                          <span className="text-sm font-semibold text-gray-400">missing</span>
+                        </div>
+                        <p className="mt-2 text-xs text-gray-500">Weight: 0.5 each</p>
+                      </div>
+                    </div>
+
+                    {/* Matched & Missing Required Skills */}
+                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-6">
+                      <h4 className="text-base font-bold text-gray-900">Required Skills Breakdown</h4>
+                      <div className="grid gap-6 md:grid-cols-2">
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
+                            <Check size={16} />
+                            <span>Matched Required Skills ({jobMatchResult.matchedRequired.length})</span>
+                          </div>
+                          {jobMatchResult.matchedRequired.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {jobMatchResult.matchedRequired.map((skill) => (
+                                <span
+                                  key={skill.name}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200"
+                                  title={skill.resumeEvidence ? `Found ${skill.resumeEvidence.occurrences}x in: ${skill.resumeEvidence.sections.join(", ")}` : undefined}
+                                >
+                                  <Check size={12} className="text-emerald-600" />
+                                  {skill.name}
+                                  {skill.resumeEvidence && (
+                                    <span className="ml-1 rounded bg-emerald-200/60 px-1 py-0.2 text-[10px] text-emerald-900">
+                                      {skill.resumeEvidence.occurrences}x
+                                    </span>
+                                  )}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-400 italic">None matched yet.</p>
+                          )}
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-xs font-semibold text-red-600">
+                            <X size={16} />
+                            <span>Missing Required Skills ({jobMatchResult.missingRequired.length})</span>
+                          </div>
+                          {jobMatchResult.missingRequired.length > 0 ? (
+                            <div className="flex flex-wrap gap-2">
+                              {jobMatchResult.missingRequired.map((skill) => (
+                                <span
+                                  key={skill.name}
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 border border-red-200"
+                                >
+                                  <X size={12} className="text-red-500" />
+                                  {skill.name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-emerald-600 font-medium">All required skills met!</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Preferred Skills Breakdown */}
+                    {(jobMatchResult.matchedPreferred.length > 0 || jobMatchResult.missingPreferred.length > 0) && (
+                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-6">
+                        <h4 className="text-base font-bold text-gray-900">Preferred Qualifications Breakdown</h4>
+                        <div className="grid gap-6 md:grid-cols-2">
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-blue-700">
+                              <Check size={16} />
+                              <span>Matched Preferred ({jobMatchResult.matchedPreferred.length})</span>
+                            </div>
+                            {jobMatchResult.matchedPreferred.length > 0 ? (
+                              <div className="flex flex-wrap gap-2">
+                                {jobMatchResult.matchedPreferred.map((skill) => (
+                                  <span
+                                    key={skill.name}
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800 border border-blue-200"
+                                    title={skill.resumeEvidence ? `Found ${skill.resumeEvidence.occurrences}x in: ${skill.resumeEvidence.sections.join(", ")}` : undefined}
+                                  >
+                                    <Check size={12} className="text-blue-600" />
+                                    {skill.name}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-gray-400 italic">None matched.</p>
+                            )}
+                          </div>
+
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-gray-600">
+                              <span>Missing Preferred ({jobMatchResult.missingPreferred.length})</span>
+                            </div>
+                            {jobMatchResult.missingPreferred.length > 0 ? (
+                              <div className="flex flex-wrap gap-2">
+                                {jobMatchResult.missingPreferred.map((skill) => (
+                                  <span
+                                    key={skill.name}
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 border border-gray-200"
+                                  >
+                                    {skill.name}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <p className="text-xs text-blue-600 font-medium">All preferred skills met!</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Additional Resume Skills */}
+                    {jobMatchResult.additionalResumeSkills.length > 0 && (
+                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-base font-bold text-gray-900">Additional Resume Skills</h4>
+                            <p className="mt-1 text-xs text-gray-500">
+                              Skills on your resume not explicitly requested by this job description. (Does not affect match score)
+                            </p>
+                          </div>
+                          <span className="text-xs font-semibold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full">
+                            {jobMatchResult.additionalResumeSkills.length} skills
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-2">
+                          {jobMatchResult.additionalResumeSkills.map((skill) => (
+                            <span
+                              key={skill.name}
+                              className="rounded-lg bg-purple-50 px-2.5 py-1 text-xs font-medium text-purple-700 border border-purple-100"
+                            >
+                              {skill.name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             )}

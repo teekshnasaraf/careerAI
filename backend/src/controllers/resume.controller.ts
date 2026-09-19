@@ -12,6 +12,7 @@ import {
 } from "../services/resumeDocumentParser.service";
 import { extractSkills, type ExtractedSkill } from "../services/skillExtractor.service";
 import { calculateDeterministicResumeScore, type DeterministicResumeScore } from "../services/resumeScoring.service";
+import { extractStructuredFromSections } from "../services/resumeStructuredExtractor.service";
 import { generateResumeAnalysis } from "../services/ai.service";
 
 export const uploadResume = async (
@@ -59,8 +60,9 @@ export const uploadResume = async (
       sections = parsedDocument.sections;
       extractedSkills = extractSkills({ cleanedText, sections }).skills;
       deterministicScore = calculateDeterministicResumeScore({ cleanedText, sections, extractedSkills });
-      // Preserve the legacy ATS/Gemini parser input; cleaned text is stored for
-      // the new deterministic parsing pipeline and future consumers.
+      // Legacy parser is kept for ATS calculations (sectionChecklist, atsBreakdown, aiFeedback, atsScore).
+      // Structured parsedData (summary, experience, education, projects) comes from the
+      // new extractor which uses the already-detected sections from the modern document parser.
       parsedResult = parseResumeText(extractedText);
     } catch (parseError) {
       if (fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
@@ -93,6 +95,8 @@ export const uploadResume = async (
       extractedText || JSON.stringify(parsedResult),
       parsedResult
     );
+    // Compute structured data once; used by both the update and create branches below
+    const structuredData = extractStructuredFromSections(sections ?? {});
 
     if (existingResume) {
       // Clean up previous Cloudinary asset / local file
@@ -124,11 +128,13 @@ export const uploadResume = async (
       existingResume.status = "parsed";
       existingResume.atsScore = aiResult.atsScore;
       existingResume.parsedData = {
-        summary: parsedResult.summary,
+        summary: structuredData.summary,
         skills: parsedResult.skills,
-        experience: parsedResult.experience,
-        education: parsedResult.education,
-        projects: parsedResult.projects,
+        experience: structuredData.experience,
+        education: structuredData.education,
+        projects: structuredData.projects,
+        extracurricular: structuredData.extracurricular,
+        achievements: structuredData.achievements,
       };
       existingResume.sectionChecklist = parsedResult.sectionChecklist;
       existingResume.atsBreakdown = parsedResult.atsBreakdown;
@@ -153,11 +159,13 @@ export const uploadResume = async (
         status: "parsed",
         atsScore: aiResult.atsScore,
         parsedData: {
-          summary: parsedResult.summary,
+          summary: structuredData.summary,
           skills: parsedResult.skills,
-          experience: parsedResult.experience,
-          education: parsedResult.education,
-          projects: parsedResult.projects,
+          experience: structuredData.experience,
+          education: structuredData.education,
+          projects: structuredData.projects,
+          extracurricular: structuredData.extracurricular,
+          achievements: structuredData.achievements,
         },
         sectionChecklist: parsedResult.sectionChecklist,
         atsBreakdown: parsedResult.atsBreakdown,

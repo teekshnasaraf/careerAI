@@ -74,12 +74,16 @@ export interface IResume extends Document {
       degree: string;
       institution: string;
       year: string;
+      score?: string;
     }>;
     projects?: Array<{
       title: string;
       description: string;
       technologies?: string[];
+      links?: string[];
     }>;
+    extracurricular?: string;
+    achievements?: string;
   };
   sectionChecklist?: SectionChecklistItem[];
   atsBreakdown?: AtsBreakdown;
@@ -205,6 +209,7 @@ const resumeSchema = new Schema<IResume>(
           degree: String,
           institution: String,
           year: String,
+          score: String,
         },
       ],
       projects: [
@@ -212,8 +217,11 @@ const resumeSchema = new Schema<IResume>(
           title: String,
           description: String,
           technologies: [String],
+          links: [String],
         },
       ],
+      extracurricular: { type: String, default: "" },
+      achievements: { type: String, default: "" },
     },
 
     sectionChecklist: [
