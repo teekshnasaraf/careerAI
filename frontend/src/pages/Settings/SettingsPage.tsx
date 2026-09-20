@@ -182,6 +182,7 @@ function SettingsPage() {
                       type="text"
                       value={settings.profile?.college || ""}
                       onChange={(e) => setSettings({ ...settings, profile: { ...settings.profile, college: e.target.value } })}
+                      placeholder="e.g. Massachusetts Institute of Technology"
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </div>
@@ -192,6 +193,7 @@ function SettingsPage() {
                       type="text"
                       value={settings.profile?.degree || ""}
                       onChange={(e) => setSettings({ ...settings, profile: { ...settings.profile, degree: e.target.value } })}
+                      placeholder="e.g. Bachelor of Science in Computer Science"
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </div>
@@ -235,6 +237,7 @@ function SettingsPage() {
                       type="text"
                       value={settings.profile?.graduationYear || ""}
                       onChange={(e) => setSettings({ ...settings, profile: { ...settings.profile, graduationYear: e.target.value } })}
+                      placeholder="e.g. 2025"
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </div>
@@ -245,6 +248,7 @@ function SettingsPage() {
                       type="text"
                       value={settings.profile?.linkedin || ""}
                       onChange={(e) => setSettings({ ...settings, profile: { ...settings.profile, linkedin: e.target.value } })}
+                      placeholder="https://linkedin.com/in/your-name"
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </div>
@@ -297,6 +301,7 @@ function SettingsPage() {
                       type="text"
                       value={settings.career?.preferredRole || ""}
                       onChange={(e) => setSettings({ ...settings, career: { ...settings.career, preferredRole: e.target.value } })}
+                      placeholder="e.g. Full Stack Engineer"
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </div>
@@ -304,10 +309,11 @@ function SettingsPage() {
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1">Experience Level</label>
                     <select
-                      value={settings.career?.experienceLevel || "Student / Fresher"}
+                      value={settings.career?.experienceLevel || ""}
                       onChange={(e) => setSettings({ ...settings, career: { ...settings.career, experienceLevel: e.target.value } })}
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     >
+                      <option value="">— Select —</option>
                       <option value="Student / Fresher">Student / Fresher</option>
                       <option value="1-3 Years Experience">1-3 Years Experience</option>
                       <option value="Senior / 5+ Years">Senior / 5+ Years</option>
@@ -317,10 +323,11 @@ function SettingsPage() {
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1">Primary Career Goal</label>
                     <select
-                      value={settings.career?.careerGoal || "Product Company Placement"}
+                      value={settings.career?.careerGoal || ""}
                       onChange={(e) => setSettings({ ...settings, career: { ...settings.career, careerGoal: e.target.value } })}
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     >
+                      <option value="">— Select —</option>
                       <option value="Product Company Placement">Product Company Placement</option>
                       <option value="FAANG Interview Prep">FAANG Interview Prep</option>
                       <option value="Campus Internship">Campus Internship</option>
@@ -332,10 +339,11 @@ function SettingsPage() {
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1">Work Setup Preference</label>
                     <select
-                      value={settings.career?.workType || "Remote"}
+                      value={settings.career?.workType || ""}
                       onChange={(e) => setSettings({ ...settings, career: { ...settings.career, workType: e.target.value } })}
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     >
+                      <option value="">— Select —</option>
                       <option value="Remote">Remote</option>
                       <option value="Hybrid">Hybrid</option>
                       <option value="Onsite">Onsite</option>
@@ -355,8 +363,10 @@ function SettingsPage() {
                     <label className="block text-xs font-bold text-gray-700 mb-1">Weekly Time Available (Hours)</label>
                     <input
                       type="number"
-                      value={settings.learning?.weeklyHours || 10}
+                      min={0}
+                      value={settings.learning?.weeklyHours ?? 0}
                       onChange={(e) => setSettings({ ...settings, learning: { ...settings.learning, weeklyHours: Number(e.target.value) } })}
+                      placeholder="e.g. 10"
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     />
                   </div>
@@ -364,10 +374,11 @@ function SettingsPage() {
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1">Preferred Learning Format</label>
                     <select
-                      value={settings.learning?.learningStyle || "Hands-on Projects"}
+                      value={settings.learning?.learningStyle || ""}
                       onChange={(e) => setSettings({ ...settings, learning: { ...settings.learning, learningStyle: e.target.value } })}
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     >
+                      <option value="">— Select —</option>
                       <option value="Hands-on Projects">Hands-on Projects</option>
                       <option value="Video Courses & Tutorials">Video Courses & Tutorials</option>
                       <option value="Documentation & Articles">Documentation & Articles</option>
@@ -387,10 +398,11 @@ function SettingsPage() {
                   <div>
                     <label className="block text-xs font-bold text-gray-700 mb-1">Preferred AI Reviewer Tone</label>
                     <select
-                      value={settings.aiPreferences?.tone || "Friendly Mentor"}
+                      value={settings.aiPreferences?.tone || ""}
                       onChange={(e) => setSettings({ ...settings, aiPreferences: { ...settings.aiPreferences, tone: e.target.value } })}
                       className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
                     >
+                      <option value="">— Select —</option>
                       <option value="Friendly Mentor">Friendly Mentor</option>
                       <option value="Strict Recruiter Reviewer">Strict Recruiter Reviewer</option>
                       <option value="FAANG Senior Interviewer">FAANG Senior Interviewer</option>

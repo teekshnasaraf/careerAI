@@ -7,28 +7,14 @@ export const getUserSettings = async (
   res: Response
 ): Promise<void> => {
   try {
-    const userDoc = await User.findById(req.userId);
+    // User lookup is no longer needed for seeding — profile starts blank.
     let settings = await UserSettings.findOne({ user: req.userId });
 
     if (!settings) {
-      settings = await UserSettings.create({
-        user: req.userId,
-        profile: {
-          name: userDoc?.fullName || "CareerAI User",
-          phone: "",
-          college: "University Institute of Technology",
-          degree: "Bachelor of Technology",
-          branch: "Computer Science & Engineering",
-          graduationYear: "2025",
-          cgpa: "8.5 / 10",
-          location: "San Francisco, CA",
-          linkedin: "https://linkedin.com/in/careerai-user",
-          github: "https://github.com/careerai-user",
-          portfolio: "https://careerai.dev",
-          bio: "Passionate software engineering candidate building full stack applications.",
-          avatarUrl: "",
-        },
-      });
+      // Create a fully empty settings document. All field defaults are defined
+      // in the schema (empty strings / neutral values). Do NOT pre-populate
+      // with personal data, example values, or data from other documents.
+      settings = await UserSettings.create({ user: req.userId });
     }
 
     res.status(200).json({
