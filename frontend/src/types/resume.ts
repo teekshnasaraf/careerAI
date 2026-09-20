@@ -19,6 +19,35 @@ export interface ParsedProject {
   links?: string[];
 }
 
+export interface ProjectDomain {
+  name: string;
+  confidence: number;
+}
+
+export interface ProjectAnalysis {
+  title: string;
+  description: string;
+  detectedSkills: string[];
+  domains: ProjectDomain[];
+  strength: {
+    overall: number;
+    implementationEvidence: number;
+    technicalDepth: number;
+    measurableOutcomes: number;
+    deploymentEvidence: number;
+    descriptionRichness: number;
+  };
+  evidence: {
+    actionVerbs: string[];
+    hasOutcome: boolean;
+    hasLink: boolean;
+    hasGitHubLink: boolean;
+    hasLiveDemo: boolean;
+    descriptionLength: number;
+  };
+  links: string[];
+}
+
 export interface SectionChecklistItem {
   name: string;
   key: string;
@@ -78,6 +107,8 @@ export interface ResumeData {
   sectionChecklist?: SectionChecklistItem[];
   atsBreakdown?: AtsBreakdown;
   aiFeedback?: AIFeedbackItem[];
+  /** Dynamically computed project analysis — not stored in DB, returned by getLatestResume. */
+  projectAnalysis?: ProjectAnalysis[];
   createdAt: string;
   updatedAt: string;
 }

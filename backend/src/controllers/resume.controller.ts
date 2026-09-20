@@ -12,7 +12,8 @@ import {
 } from "../services/resumeDocumentParser.service";
 import { extractSkills, type ExtractedSkill } from "../services/skillExtractor.service";
 import { calculateDeterministicResumeScore, type DeterministicResumeScore } from "../services/resumeScoring.service";
-import { extractStructuredFromSections } from "../services/resumeStructuredExtractor.service";
+import { extractStructuredFromSections, type StructuredParsedData } from "../services/resumeStructuredExtractor.service";
+import { analyzeProjects, getProjectStrengthScores, type AnalyzedProject } from "../services/projectAnalysis.service";
 import { generateResumeAnalysis } from "../services/ai.service";
 
 export const uploadResume = async (
@@ -53,13 +54,22 @@ export const uploadResume = async (
     let sections: ResumeSections | undefined;
     let extractedSkills: ExtractedSkill[] = [];
     let deterministicScore: DeterministicResumeScore | undefined;
+    // structuredData is initialised here so it is accessible after the try block;
+    // the default ensures the update/create branches always have a valid shape.
+    let structuredData: StructuredParsedData = {
+      summary: "", experience: [], education: [], projects: [],
+      extracurricular: "", achievements: "",
+    };
     try {
       const parsedDocument = await parseResumeDocument(tempFilePath, mimetype);
       extractedText = parsedDocument.rawText;
       cleanedText = parsedDocument.cleanedText;
       sections = parsedDocument.sections;
       extractedSkills = extractSkills({ cleanedText, sections }).skills;
-      deterministicScore = calculateDeterministicResumeScore({ cleanedText, sections, extractedSkills });
+      // Extract structured data BEFORE scoring so project quality can inform the score.
+      structuredData = extractStructuredFromSections(sections ?? {});
+      const projectStrengths = getProjectStrengthScores(structuredData.projects);
+      deterministicScore = calculateDeterministicResumeScore({ cleanedText, sections, extractedSkills, projectStrengths });
       // Legacy parser is kept for ATS calculations (sectionChecklist, atsBreakdown, aiFeedback, atsScore).
       // Structured parsedData (summary, experience, education, projects) comes from the
       // new extractor which uses the already-detected sections from the modern document parser.
@@ -95,8 +105,7 @@ export const uploadResume = async (
       extractedText || JSON.stringify(parsedResult),
       parsedResult
     );
-    // Compute structured data once; used by both the update and create branches below
-    const structuredData = extractStructuredFromSections(sections ?? {});
+    // structuredData is already computed inside the try block above.
 
     if (existingResume) {
       // Clean up previous Cloudinary asset / local file
@@ -203,10 +212,13 @@ export const uploadResume = async (
       resumeUrl: fileUrl,
     });
 
+    // Compute project analysis dynamically so fresh uploads immediately have strength/domain data
+    const projectAnalysis = analyzeProjects(structuredData.projects);
+
     res.status(200).json({
       success: true,
       message: "Resume uploaded and parsed successfully",
-      data: resume,
+      data: { ...resume.toObject(), projectAnalysis },
     });
   } catch (error) {
     console.error("Error uploading resume:", error);
@@ -235,9 +247,23 @@ export const getLatestResume = async (
       return;
     }
 
+    // Compute project analysis dynamically — not persisted in MongoDB.
+    // This avoids a schema change while still exposing strength and domain data.
+    let projectAnalysis: AnalyzedProject[] = [];
+    if (resume.parsedData?.projects && resume.parsedData.projects.length > 0) {
+      projectAnalysis = analyzeProjects(
+        resume.parsedData.projects.map((p) => ({
+          title: p.title ?? "",
+          description: p.description ?? "",
+          technologies: Array.isArray(p.technologies) ? [...p.technologies] : [],
+          links: Array.isArray(p.links) ? [...p.links] : [],
+        }))
+      );
+    }
+
     res.status(200).json({
       success: true,
-      data: resume,
+      data: { ...resume.toObject(), projectAnalysis },
     });
   } catch (error) {
     console.error("Error fetching resume:", error);

@@ -24,7 +24,7 @@ import {
 
 import ResumeUploadCard, { formatFileSize } from "../../components/resume/ResumeUploadCard";
 import { getLatestResumeApi, deleteResumeApi } from "../../features/resume/resume.service";
-import { matchJobDescriptionApi, type JobMatchResult } from "../../features/jobs/jobs.service";
+import { matchJobDescriptionApi, type JobMatchResult, type ProjectJobRelevance } from "../../features/jobs/jobs.service";
 import type { ResumeData } from "../../types/resume";
 import axios from "axios";
 
@@ -41,6 +41,7 @@ function ResumePage() {
   const [matchingJob, setMatchingJob] = useState(false);
   const [jobMatchResult, setJobMatchResult] = useState<JobMatchResult | null>(null);
   const [jobMatchError, setJobMatchError] = useState<string | null>(null);
+  const [projectRelevance, setProjectRelevance] = useState<ProjectJobRelevance[] | null>(null);
 
   const fetchResume = async () => {
     try {
@@ -121,6 +122,7 @@ function ResumePage() {
       const res = await matchJobDescriptionApi(jobDescriptionInput, resume?._id);
       if (res.success && res.match) {
         setJobMatchResult(res.match);
+        setProjectRelevance(res.projectRelevance ?? null);
       } else {
         setJobMatchError(res.message || "Failed to calculate job match.");
       }
@@ -672,39 +674,84 @@ function ResumePage() {
                 <h3 className="text-base font-bold text-gray-900 mb-4">Extracted Projects</h3>
                 {resume.parsedData?.projects && resume.parsedData.projects.length > 0 ? (
                   <div className="space-y-4">
-                    {resume.parsedData.projects.map((proj, idx) => (
-                      <div key={idx} className="rounded-xl border border-gray-200 p-5 space-y-2">
-                        <h4 className="font-bold text-gray-900 text-base">{proj.title}</h4>
-                        {proj.description && (
-                          <p className="text-xs text-gray-600 leading-relaxed">{proj.description}</p>
-                        )}
-                        {proj.technologies && proj.technologies.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5 pt-2">
-                            {proj.technologies.map((tech) => (
-                              <span key={tech} className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700">
-                                {tech}
-                              </span>
-                            ))}
+                    {resume.parsedData.projects.map((proj, idx) => {
+                      const analysis = resume.projectAnalysis?.find(
+                        (a) => a.title === proj.title
+                      );
+                      return (
+                        <div key={idx} className="rounded-xl border border-gray-200 p-5 space-y-3">
+                          {/* Project title + strength badge */}
+                          <div className="flex items-start justify-between gap-3 flex-wrap">
+                            <h4 className="font-bold text-gray-900 text-base">{proj.title}</h4>
+                            {analysis && (
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span
+                                  className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                                    analysis.strength.overall >= 70
+                                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                      : analysis.strength.overall >= 40
+                                      ? "bg-amber-50 text-amber-700 border-amber-200"
+                                      : "bg-gray-50 text-gray-500 border-gray-200"
+                                  }`}
+                                  title={`Impl: ${analysis.strength.implementationEvidence} | Depth: ${analysis.strength.technicalDepth} | Outcomes: ${analysis.strength.measurableOutcomes} | Deploy: ${analysis.strength.deploymentEvidence} | Richness: ${analysis.strength.descriptionRichness}`}
+                                >
+                                  Strength {analysis.strength.overall}/100
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {proj.links && proj.links.length > 0 && (
-                          <div className="flex flex-wrap gap-2 pt-1">
-                            {proj.links.map((link, linkIdx) => (
-                              <a
-                                key={linkIdx}
-                                href={link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 border border-blue-100 hover:bg-blue-100 transition"
-                              >
-                                <ExternalLink size={11} />
-                                {link.replace(/^https?:\/\//, "").slice(0, 45)}{link.length > 50 ? "…" : ""}
-                              </a>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
+
+                          {/* Domain badges */}
+                          {analysis && analysis.domains.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5">
+                              {analysis.domains.map((domain) => (
+                                <span
+                                  key={domain.name}
+                                  className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 border border-blue-100"
+                                  title={`Confidence: ${Math.round(domain.confidence * 100)}%`}
+                                >
+                                  {domain.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Description */}
+                          {proj.description && (
+                            <p className="text-xs text-gray-600 leading-relaxed">{proj.description}</p>
+                          )}
+
+                          {/* Detected skills from analysis */}
+                          {analysis && analysis.detectedSkills.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {analysis.detectedSkills.map((skill) => (
+                                <span key={skill} className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700">
+                                  {skill}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Links */}
+                          {proj.links && proj.links.length > 0 && (
+                            <div className="flex flex-wrap gap-2 pt-1">
+                              {proj.links.map((link, linkIdx) => (
+                                <a
+                                  key={linkIdx}
+                                  href={link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 border border-blue-100 hover:bg-blue-100 transition"
+                                >
+                                  <ExternalLink size={11} />
+                                  {link.replace(/^https?:\/\//, "").slice(0, 45)}{link.length > 50 ? "…" : ""}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 ) : (
                   <p className="text-sm text-gray-500">No Project entries detected in document text.</p>
@@ -966,6 +1013,68 @@ Example:
                               {skill.name}
                             </span>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Per-Project Relevance */}
+                    {projectRelevance && projectRelevance.length > 0 && (
+                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-5">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-base font-bold text-gray-900">Project Relevance for This JD</h4>
+                            <p className="mt-1 text-xs text-gray-500">
+                              How well each project aligns with this specific job description. Job Value = 40% Strength + 60% Relevance.
+                            </p>
+                          </div>
+                          <FolderGit2 size={18} className="text-purple-400 flex-shrink-0" />
+                        </div>
+                        <div className="space-y-3">
+                          {[...projectRelevance]
+                            .sort((a, b) => b.jobValue - a.jobValue)
+                            .map((proj) => (
+                              <div key={proj.title} className="rounded-xl border border-gray-200 p-4 space-y-3">
+                                <div className="flex items-start justify-between gap-3 flex-wrap">
+                                  <h5 className="font-semibold text-gray-800 text-sm">{proj.title}</h5>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <span className="text-xs text-gray-500">Relevance</span>
+                                    <span
+                                      className={`text-xs font-bold px-2 py-0.5 rounded-full border ${
+                                        proj.relevanceScore >= 70
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                          : proj.relevanceScore >= 40
+                                          ? "bg-amber-50 text-amber-700 border-amber-200"
+                                          : "bg-red-50 text-red-600 border-red-200"
+                                      }`}
+                                    >
+                                      {proj.relevanceScore}%
+                                    </span>
+                                    <span className="text-xs text-gray-500">Job Value</span>
+                                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200">
+                                      {proj.jobValue}/100
+                                    </span>
+                                  </div>
+                                </div>
+                                {proj.matchedRequiredSkills.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {proj.matchedRequiredSkills.map((s) => (
+                                      <span key={s} className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-100">
+                                        <Check size={10} /> {s}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {proj.missingRequiredSkills.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {proj.missingRequiredSkills.map((s) => (
+                                      <span key={s} className="inline-flex items-center gap-1 rounded-md bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600 border border-red-100">
+                                        <X size={10} /> {s}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
                         </div>
                       </div>
                     )}

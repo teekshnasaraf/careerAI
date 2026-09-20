@@ -3,6 +3,8 @@ import Resume from "../models/Resume";
 import { parseJobDescription } from "../services/jobDescription.service";
 import { calculateJobMatch } from "../services/jobMatch.service";
 import { extractSkills } from "../services/skillExtractor.service";
+import { analyzeProjects } from "../services/projectAnalysis.service";
+import { calculateProjectRelevance } from "../services/projectJobMatching.service";
 
 export const matchJobDescription = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -31,9 +33,24 @@ export const matchJobDescription = async (req: Request, res: Response): Promise<
     const parsedJob = parseJobDescription(jobDescription);
     const match = calculateJobMatch(parsedJob.requirements, skillsToMatch);
 
+    // Per-project relevance — additional evidence layer; does not modify the existing score.
+    let projectRelevance: ReturnType<typeof calculateProjectRelevance> = [];
+    if (resume.parsedData?.projects && resume.parsedData.projects.length > 0) {
+      const analyzedProjects = analyzeProjects(
+        resume.parsedData.projects.map((p) => ({
+          title: p.title ?? "",
+          description: p.description ?? "",
+          technologies: Array.isArray(p.technologies) ? [...p.technologies] : [],
+          links: Array.isArray(p.links) ? [...p.links] : [],
+        }))
+      );
+      projectRelevance = calculateProjectRelevance(analyzedProjects, parsedJob);
+    }
+
     res.status(200).json({
       success: true,
       match,
+      projectRelevance,
       data: {
         jobRequirements: parsedJob.requirements,
         totalDetectedRequirements: parsedJob.totalDetectedRequirements,
@@ -45,3 +62,4 @@ export const matchJobDescription = async (req: Request, res: Response): Promise<
     res.status(500).json({ success: false, message: "Server error matching job description" });
   }
 };
+

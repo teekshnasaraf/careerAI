@@ -38,6 +38,13 @@ export interface ResumeScoringInput {
   cleanedText: string;
   sections?: Partial<ResumeSections>;
   extractedSkills: ScorableSkill[];
+  /**
+   * Optional per-project strength scores (0–100), sorted highest-first.
+   * When provided, replaces the section-text-based project evidence calculation
+   * with a quality-weighted portfolio score using diminishing returns.
+   * When absent, the original flat section scorer is used (backward-compatible).
+   */
+  projectStrengths?: number[];
 }
 
 /**
@@ -52,6 +59,19 @@ export const RESUME_SCORE_COMPONENT_CAPS = {
   experienceEvidence: 10,
   structuralChecks: 5,
 } as const;
+
+/**
+ * Per-project portfolio contribution weights (diminishing returns).
+ * The strongest project contributes most; each additional project contributes less.
+ * This prevents many weak projects from outscoring a few strong ones.
+ *
+ * Index:   0     1     2     3     4     5     6+
+ * Weight: 0.40  0.25  0.15  0.10  0.05  0.05  0.02
+ *
+ * Six perfect-strength (100) projects reach the 15-point maximum:
+ *   100 × (0.40+0.25+0.15+0.10+0.05+0.05) = 100 → scaled to 15 pts.
+ */
+export const PORTFOLIO_WEIGHTS = [0.40, 0.25, 0.15, 0.10, 0.05, 0.05] as const;
 
 const ACTION_VERBS = /\b(built|developed|designed|implemented|created|led|improved|optimized|deployed|delivered|engineered|automated|analyzed)\b/i;
 const OUTCOME_PATTERN = /(?:\b\d+(?:\.\d+)?%|\$\s?\d+|\b\d+\s*(?:users|clients|customers|projects|hours|days|months|years)\b)/i;
@@ -73,7 +93,7 @@ const hasSkillIn = (skills: ScorableSkill[], sections: string[]): boolean => ski
  * - Structural checks (max 5): readable text 1, 250+ characters 2, 3+ populated
  *   sections 2.
  */
-export const calculateDeterministicResumeScore = ({ cleanedText, sections = {}, extractedSkills }: ResumeScoringInput): DeterministicResumeScore => {
+export const calculateDeterministicResumeScore = ({ cleanedText, sections = {}, extractedSkills, projectStrengths }: ResumeScoringInput): DeterministicResumeScore => {
   const uniqueSkills = [...new Map(extractedSkills.map((skill) => [skill.name, skill])).values()];
   const skillContributions = uniqueSkills.map((skill) => ({
     name: skill.name,
@@ -99,10 +119,30 @@ export const calculateDeterministicResumeScore = ({ cleanedText, sections = {}, 
   const hasOptionalAchievement = hasMeaningfulContent(sections.certifications, 10) || hasMeaningfulContent(sections.achievements, 10);
   const sectionCompleteness = (hasSummary ? 4 : 0) + (hasEducation ? 4 : 0) + (hasSkills ? 4 : 0) + (hasProjects || hasExperience ? 6 : 0) + (hasOptionalAchievement ? 2 : 0);
 
-  const projectText = sections.projects?.trim() || "";
-  const projectEvidence = Math.min(RESUME_SCORE_COMPONENT_CAPS.projectEvidence,
-    (hasMeaningfulContent(projectText, 50) ? 6 : 0) + (hasSkillIn(uniqueSkills, ["projects"]) ? 4 : 0) + (ACTION_VERBS.test(projectText) ? 3 : 0) + (OUTCOME_PATTERN.test(projectText) ? 2 : 0)
-  );
+  // Project evidence: quality-weighted portfolio scoring when per-project strengths
+  // are available; falls back to the original section-text heuristics for full
+  // backward compatibility with callers that do not pass projectStrengths.
+  let projectEvidence: number;
+  if (projectStrengths !== undefined) {
+    // Portfolio quality scoring with diminishing returns.
+    // portfolioRaw is on a 0–100 scale matching per-project strength (0–100).
+    const sorted = [...projectStrengths].sort((a, b) => b - a);
+    let portfolioRaw = 0;
+    for (let i = 0; i < sorted.length; i++) {
+      const weight = i < PORTFOLIO_WEIGHTS.length ? PORTFOLIO_WEIGHTS[i] : 0.02;
+      portfolioRaw += sorted[i] * weight;
+    }
+    projectEvidence = Math.min(
+      RESUME_SCORE_COMPONENT_CAPS.projectEvidence,
+      Math.round((portfolioRaw / 100) * RESUME_SCORE_COMPONENT_CAPS.projectEvidence)
+    );
+  } else {
+    // Original section-text scorer — unchanged, preserves all existing tests.
+    const projectText = sections.projects?.trim() || "";
+    projectEvidence = Math.min(RESUME_SCORE_COMPONENT_CAPS.projectEvidence,
+      (hasMeaningfulContent(projectText, 50) ? 6 : 0) + (hasSkillIn(uniqueSkills, ["projects"]) ? 4 : 0) + (ACTION_VERBS.test(projectText) ? 3 : 0) + (OUTCOME_PATTERN.test(projectText) ? 2 : 0)
+    );
+  }
 
   const experienceText = [sections.experience, sections.internships].filter(Boolean).join("\n");
   const experienceEvidence = Math.min(RESUME_SCORE_COMPONENT_CAPS.experienceEvidence,

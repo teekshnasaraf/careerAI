@@ -35,10 +35,24 @@ export interface JobMatchResult {
   breakdown: JobMatchBreakdown[];
 }
 
+export interface ProjectJobRelevance {
+  title: string;
+  relevanceScore: number;           // 0–100
+  matchedRequiredSkills: string[];
+  missingRequiredSkills: string[];
+  matchedPreferredSkills: string[];
+  missingPreferredSkills: string[];
+  domainAlignment: number;          // 0–1
+  responsibilityAlignment: number;  // 0–1
+  jobValue: number;                 // 0–100
+}
+
 export interface JobMatchResponse {
   success: boolean;
   message?: string;
   match: JobMatchResult;
+  /** Per-project relevance scores for this specific JD. Absent when no projects are parsed. */
+  projectRelevance?: ProjectJobRelevance[];
   data?: {
     jobRequirements: Array<{
       name: string;
