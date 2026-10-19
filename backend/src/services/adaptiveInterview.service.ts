@@ -10,7 +10,7 @@ const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 async function callGeminiWithFallback(prompt: string): Promise<string> {
   if (!ai || process.env.NODE_ENV === "test") return "";
-  const models = ["gemini-2.5-flash", "gemini-2.0-flash", "models/gemma-4-26b-a4b-it", "gemini-2.0-flash-lite"];
+  const models = ["gemini-2.0-flash", "models/gemma-4-26b-a4b-it", "gemini-2.0-flash-lite"];
   for (const model of models) {
     try {
       const response = await ai.models.generateContent({ model, contents: prompt });
@@ -866,6 +866,7 @@ export function synthesizeAdaptiveInterviewReport(params: {
   historicalSessions?: Array<{ overallScore: number; createdAt: Date }>;
 }): {
   overallScore: number;
+  topicBreakdown: Array<{ topic: string; score: number }>;
   dimensionScores: {
     technicalCorrectness: number;
     accuracy: number;
@@ -894,6 +895,7 @@ export function synthesizeAdaptiveInterviewReport(params: {
   if (responses.length === 0) {
     return {
       overallScore: 0,
+      topicBreakdown: [],
       dimensionScores: {
         technicalCorrectness: 0,
         accuracy: 0,
@@ -1021,6 +1023,7 @@ export function synthesizeAdaptiveInterviewReport(params: {
 
   return {
     overallScore,
+    topicBreakdown: assessedSkills.map((s) => ({ topic: s.skill, score: s.score })),
     dimensionScores,
     assessedSkills,
     unassessedSkills,

@@ -124,6 +124,13 @@ function InterviewPage() {
     if (location.state && (location.state as any).projectEvidenceId) {
       setSelectedProjectId((location.state as any).projectEvidenceId);
     }
+    if (location.state && (location.state as any).targetSkill) {
+      const skill = (location.state as any).targetSkill;
+      if ((location.state as any).targetRole) {
+        setSelectedRole((location.state as any).targetRole);
+      }
+      setJobDescriptionInput(`Required Skill: ${skill}\nTarget Proficiency: Practical Application & System Architecture`);
+    }
   }, [location.state]);
 
   const resumeExistingSession = (session: InterviewSessionData) => {

@@ -40,9 +40,20 @@ export const analyzeProjectEvidence = async (req: Request, res: Response): Promi
       return;
     }
 
-    // Extract claimed skills from candidate's resume project if not explicitly supplied
     let effectiveSkills: string[] = Array.isArray(claimedSkills) ? claimedSkills : [];
     let effectiveResumeId = resumeId;
+
+    if (resumeId) {
+      const resume = await Resume.findOne({ _id: resumeId, user: req.userId });
+      if (!resume) {
+        res.status(404).json({
+          success: false,
+          message: "Specified resume not found or unauthorized.",
+        });
+        return;
+      }
+      effectiveResumeId = resume._id;
+    }
 
     const resume = resumeId
       ? await Resume.findOne({ _id: resumeId, user: req.userId })
@@ -128,8 +139,9 @@ export const analyzeProjectEvidence = async (req: Request, res: Response): Promi
  */
 export const getProjectEvidence = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { projectTitle } = req.params;
-    if (!projectTitle) {
+    const rawProjectTitle = req.params.projectTitle;
+    const projectTitle = Array.isArray(rawProjectTitle) ? rawProjectTitle[0] : rawProjectTitle;
+    if (!projectTitle || !projectTitle.trim()) {
       res.status(400).json({ success: false, message: "Project title is required." });
       return;
     }
@@ -211,6 +223,39 @@ export const deleteProjectEvidence = async (req: Request, res: Response): Promis
     res.status(500).json({
       success: false,
       message: "Failed to delete project evidence.",
+    });
+  }
+};
+
+/**
+ * Retrieves a specific project evidence record by its MongoDB ID.
+ * GET /api/project-evidence/:id
+ */
+export const getProjectEvidenceById = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const record = await ProjectEvidence.findOne({
+      _id: id,
+      user: req.userId,
+    });
+
+    if (!record) {
+      res.status(404).json({
+        success: false,
+        message: "Project evidence record not found or unauthorized.",
+      });
+      return;
+    }
+
+    res.status(200).json({
+      success: true,
+      data: record,
+    });
+  } catch (error: any) {
+    console.error("Error retrieving project evidence by ID:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to retrieve project evidence record.",
     });
   }
 };

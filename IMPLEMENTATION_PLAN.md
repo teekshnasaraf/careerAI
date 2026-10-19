@@ -36,6 +36,7 @@ To maintain strict documentation integrity, the repository has been audited dire
 | **Google Gemini AI Pipeline** | **Fully Implemented** | Multi-model fallback (`gemini-2.0-flash` -> `gemma-4-26b-a4b-it` -> `gemini-2.0-flash-lite`) with rule-based fallback in [ai.service.ts](file:///d:/coding/careerAI/backend/src/services/ai.service.ts). |
 | **Adaptive AI Interview Engine** | **Fully Implemented** | Dynamic question adaptation, 5-dimension engineering rubric evaluation, decision policy (follow-ups/difficulty tuning), topic prioritization from JD and roadmap gaps, and session recovery in [adaptiveInterview.service.ts](file:///d:/coding/careerAI/backend/src/services/adaptiveInterview.service.ts) and [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts). |
 | **GitHub Project Evidence Verification** | **Fully Implemented** | SSRF-safe GitHub repository fetching, manifest vs observed dependency analysis, architectural signal extraction, 4-status claim verification rubric, prompt-injection defense, and grounded adaptive interview questions in [githubEvidence.service.ts](file:///d:/coding/careerAI/backend/src/services/githubEvidence.service.ts), [ProjectEvidence.ts](file:///d:/coding/careerAI/backend/src/models/ProjectEvidence.ts), [projectEvidence.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/projectEvidence.controller.ts), and [projectEvidence.service.ts](file:///d:/coding/careerAI/frontend/src/features/projectEvidence/projectEvidence.service.ts). |
+| **End-to-End Integration & Production Hardening** | **Fully Implemented** | Full user journey integrity (resume -> match -> roadmap -> project evidence -> adaptive interview), cascade cleanup on deletion, strict cross-user data isolation, fixed-mode auto-completion, and navigation state hydration in [endToEndIntegration.service.test.ts](file:///d:/coding/careerAI/backend/src/services/endToEndIntegration.service.test.ts). |
 | **User Authentication & Authorization** | **Fully Implemented** | Bcrypt hashing, JWT issuance/verification, Zod request body validation in [auth.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/auth.controller.ts) and [auth.middleware.ts](file:///d:/coding/careerAI/backend/src/middleware/auth.middleware.ts). |
 | **Cloud File Storage** | **Fully Implemented** | Cloudinary raw resource upload with local disk fallback in [cloudinary.ts](file:///d:/coding/careerAI/backend/src/config/cloudinary.ts). |
 | **Skill Dependency Graph & Roadmap** | **Fully Implemented** | Directed acyclic graph (DAG) cycle detection (3-color DFS), topological sorting (Kahn's algorithm with priority tie-breaking), transitive dependency expansion, and interactive personalized roadmap tracking in [skillGraph.service.ts](file:///d:/coding/careerAI/backend/src/services/skillGraph.service.ts), [roadmap.service.ts](file:///d:/coding/careerAI/backend/src/services/roadmap.service.ts), and [Roadmap.ts](file:///d:/coding/careerAI/backend/src/models/Roadmap.ts). |
@@ -1162,6 +1163,30 @@ Findings from `ProjectEvidence` seamlessly ground Phase 3's adaptive interview e
   - `aiPreferences`: Tone, explanation depth, auto-analyze toggle.
   - `notifications`: Email, interview reminders, weekly progress alerts.
 
+### 13.5 End-to-End Integration & Production Hardening (Phase 5 Implementation)
+
+Phase 5 hardens the entire CareerAI product lifecycle, ensuring seamless interoperability between resume parsing, explainable job description matching, skill graph roadmaps, GitHub project evidence verification, and adaptive mock interviews.
+
+#### 13.5.1 Identified Integration Gaps & Engineering Fixes
+1. **Cascade Cleanup on Resume Deletion:**
+   - *Previous Gap:* Deleting a resume via `DELETE /api/resume/:id` removed the resume document, but left orphaned `Analysis` and `ProjectEvidence` records.
+   - *Fix:* `deleteResume` now cascade-deletes the user's `Analysis` documents and all `ProjectEvidence` records referencing the deleted resume ID, resetting `user.resumeUrl` cleanly.
+2. **Strict Active-Resume Scoping for Analysis Reports:**
+   - *Previous Gap:* `getLatestAnalysis` fetched any existing analysis for the user, potentially returning analysis results from an older, replaced resume.
+   - *Fix:* `getLatestAnalysis` scopes queries strictly to `{ user: req.userId, resumeId: resume._id }`. If no analysis exists for the current active resume, it triggers a fresh analysis computation.
+3. **Dashboard & Progress Metric Integrity Without Resume:**
+   - *Previous Gap:* If a user had no resume uploaded, `getDashboardStats` and `getProgressStats` could still display non-zero scores if stale analysis records existed in the database.
+   - *Fix:* Controller formulas now strictly guard: `const resumeScore = resumeUploaded ? (analysis?.resumeScore || resume?.atsScore || 0) : 0;`, guaranteeing zero-inflation immunity.
+4. **Cross-User Data Isolation in Project Evidence & Interviews:**
+   - *Previous Gap:* Passing an invalid or foreign `projectEvidenceId` to `startInterviewSession` silently ignored the ID and fell back to an ungrounded interview without notifying the caller.
+   - *Fix:* `startInterviewSession` verifies user ownership and strictly returns `404 Not Found` if the requested `projectEvidenceId` does not belong to `req.userId`. Similarly, `analyzeProjectEvidence` strictly validates `resumeId` ownership.
+5. **Fixed Mode Auto-Completion Parity:**
+   - *Previous Gap:* Submitting the final answer in fixed mock interview mode did not trigger report synthesis unless `finishInterviewSession` was separately called.
+   - *Fix:* `submitQuestionAnswer` checks `session.responses.length >= session.questions.length` in fixed mode and automatically synthesizes the 5-dimension rubric performance report, saving `session.status = "completed"`.
+6. **Seamless Roadmap & Missing Skill to Interview Handoff:**
+   - *Previous Gap:* Candidates viewing prioritized missing skills or roadmap steps had to manually navigate to the interview page and re-enter their target skill.
+   - *Fix:* `ResumePage.tsx` integrates direct "Practice in Interview" actions on every roadmap step and missing skill card, hydrating `InterviewPage.tsx` via location state (`targetSkill`, `targetRole`).
+
 ---
 
 ## 14. API Endpoint Inventory
@@ -1192,7 +1217,9 @@ Findings from `ProjectEvidence` seamlessly ground Phase 3's adaptive interview e
 | `POST` | `/api/interview/finish` | Yes | `interview.controller.finishInterviewSession` | `{ sessionId }` | `{ success: true, data: InterviewSession }` |
 | `POST` | `/api/project-evidence/analyze` | Yes | `projectEvidence.controller.analyzeProjectEvidence` | `{ repositoryUrl, projectTitle, resumeId?, claimedSkills? }` | `{ success: true, data: ProjectEvidenceDocument }` |
 | `GET` | `/api/project-evidence` | Yes | `projectEvidence.controller.getAllUserProjectEvidence` | None | `{ success: true, data: ProjectEvidenceDocument[] }` |
-| `GET` | `/api/project-evidence/:id` | Yes | `projectEvidence.controller.getProjectEvidence` | URL Param `:id` | `{ success: true, data: ProjectEvidenceDocument }` |
+| `GET` | `/api/project-evidence/user` | Yes | `projectEvidence.controller.getAllUserProjectEvidence` | None | `{ success: true, data: ProjectEvidenceDocument[] }` |
+| `GET` | `/api/project-evidence/project/:projectTitle` | Yes | `projectEvidence.controller.getProjectEvidence` | URL Param `:projectTitle` | `{ success: true, data: ProjectEvidenceDocument }` |
+| `GET` | `/api/project-evidence/:id` | Yes | `projectEvidence.controller.getProjectEvidenceById` | URL Param `:id` | `{ success: true, data: ProjectEvidenceDocument }` |
 | `DELETE` | `/api/project-evidence/:id` | Yes | `projectEvidence.controller.deleteProjectEvidence` | URL Param `:id` | `{ success: true, message: "Project evidence deleted successfully" }` |
 | `GET` | `/api/progress/stats` | Yes | `progress.controller.getProgressStats` | None | `{ success: true, data: { currentResumeScore, achievements, activeRoadmap, ... } }` |
 | `GET` | `/api/settings` | Yes | `settings.controller.getUserSettings` | None | `{ success: true, data: UserSettings }` |
@@ -1238,15 +1265,17 @@ node -r ts-node/register --test `
   src/services/skillExtractor.service.test.ts `
   src/services/skillGraph.service.test.ts `
   src/services/adaptiveInterview.service.test.ts `
-  src/services/githubEvidence.service.test.ts
+  src/services/githubEvidence.service.test.ts `
+  src/services/endToEndIntegration.service.test.ts
 ```
 
 ### 16.2 Actual Verification Results
-- **Total Tests Executed:** 183 tests
-- **Passing Tests:** 183
+- **Total Tests Executed:** 192 tests
+- **Passing Tests:** 192
 - **Failing Tests:** 0
-- **Execution Duration:** ~3.2 seconds
+- **Execution Duration:** ~3.4 seconds
 - **Breakdown by Test File:**
+  - `endToEndIntegration.service.test.ts`: 9 tests passed (end-to-end job match flowing directly into roadmap generation, demonstrated prerequisites exclusion, unmet prerequisites scheduling in Phase 1 before dependent targets, deterministic roadmap completion math and progress aggregation boundaries, project evidence connection grounding interview questions and topic prioritization, cross-user isolation rejecting foreign project evidence, adaptive decision policy progressing across difficulty tiers and finishing cleanly, final performance report synthesis with rubric averages and historical comparison deltas, dashboard and progress metrics zero-inflation immunity when no resume is uploaded, empty and non-technical job description handling returning null scores without errors).
   - `githubEvidence.service.test.ts`: 20 tests passed (canonical URL normalization with trailing slash/.git strip, rejection of non-GitHub domains, SSRF protection rejecting localhost and link-local 169.254.169.254, SSRF protection rejecting private IPv4 ranges, rejection of embedded auth credentials in URLs, deterministic package.json manifest parsing, requirements.txt parsing with comment/specifier strip, go.mod module dependency parsing, observed source import extraction from JS/TS and Python, distinction between declared dependencies and observed imports, architectural signal detection for API routes/models/auth/tests/CI-CD/Docker, `supported` status for active source imports and models, `partially_supported` status for manifest-only or doc-only claims, `not_found` status for absent technologies without false accusations, `unable_to_assess` status when tree or file content is empty/inaccessible, interview question grounding in real observed files and architectural choices, interview question motivation references without fabrication, prompt injection sanitization against instruction overrides, file provenance and snippet attribution, empty tree graceful fallback).
   - `adaptiveInterview.service.test.ts`: 18 tests passed (strong answers step-up difficulty, partially correct answers trigger targeted clarification follow-up, weak answers trigger foundational check, required unassessed skills prioritized, assessed skills deprioritized, follow-up incorporates gap/parent question, distinct questions and normalized skill names, question and follow-up budget enforcement, completion report aggregation, empty answers score 0 without fabrication, bounded rubric scores 0-100, 5-dimension rubric weights formula, final report distinguishes assessed from untested skills, historical comparison calculates score deltas, question bank covers all tiers, empty responses edge case handled, duplicate skill aliases normalized, unknown skill fallback).
   - `skillGraph.service.test.ts`: 18 tests passed (valid DAG construction with 0 cycles across curated graph, 2-node cycle detection, multi-node cycle detection, topological ordering with prerequisites before dependents, multi-prerequisite resolution, shared prerequisite deduplication, retention of unmet prerequisites absent from JD, exclusion of candidate-demonstrated skills, alias normalization, required vs preferred prioritization, deterministic tie-breaking, empty target lists, unknown skill definitions, cyclic definition rejection, deterministic educational fallback, roadmap 4-phase assignment, completion percentage calculation, and downstream unlock mapping).
@@ -1343,6 +1372,7 @@ flowchart LR
 - Intelligent, personalized learning roadmap generation with practical exercises, deliverables, and interactive step completion tracking (Phase 2).
 - Adaptive AI interview engine with 5-dimension rubric, dynamic difficulty tuning, gap follow-ups, and session recovery (Phase 3).
 - GitHub project evidence verification pipeline with SSRF defenses, manifest parsing, import extraction, architectural signal detection, 4-status claim verification rubric, and grounded adaptive interview questions (Phase 4).
+- End-to-end cross-phase integration, cross-user authorization enforcement, cascade deletion cleanup, zero-inflation metrics protection, and seamless multi-stage UX handoffs (Phase 5).
 - Per-project strength and relevance analyzers.
 - Multi-model Gemini integration with rule-based and curated template fallbacks.
 - Authenticated JWT user management and MongoDB data lifecycle.
@@ -1354,6 +1384,39 @@ flowchart LR
 3. **Email Notifications:** `nodemailer` is listed in `backend/package.json`, but no mailer service or email verification workflows are active.
 4. **Cloudinary Fallback URL:** When Cloudinary environment keys are not provided, files are referenced via `http://localhost:5000/uploads/resumes/`. Ensure static serving is enabled in production.
 
+### 18.3 Phase 5: End-to-End Integration, Cross-User Isolation, and Production Hardening
+- **Actual Integration Gaps Discovered & Resolved:**
+  1. *Resume Deletion Cascading:* Deleting a resume (`DELETE /api/resume`) left orphan `Analysis` and `ProjectEvidence` records in MongoDB, and left `user.resumeUrl` pointing to deleted files. Fixed in `resume.controller.ts` with cascading cleanup of analysis and evidence documents and user profile reset.
+  2. *Active Resume Scoping in Analysis:* `getLatestAnalysis` fetched by user without scoping to the user's active resume, showing stale analysis after re-upload or deletion. Fixed in `analysis.controller.ts` to strictly verify and match `resumeId: resume._id`.
+  3. *Zero-Inflation Protection on Dashboard & Progress Stats:* When no resume was uploaded, stats defaulted to fallback scores (e.g. 70/85) rather than 0. Fixed in `dashboard.controller.ts` and `progress.controller.ts` to return strictly 0 when `resumeUploaded` is false.
+  4. *Project Evidence Cross-User Isolation:* Added ownership verification for `resumeId` when saving repository evidence (`projectEvidence.controller.ts`), returning 404 if the resume doesn't belong to the authenticated user. Added `GET /api/project-evidence/:id` controller and route.
+  5. *Interview Evidence Grounding Isolation:* In `interview.controller.ts`, validated that `projectEvidenceId` belongs to `req.userId`, returning 404 rather than silently proceeding ungrounded or cross-contaminating candidate sessions.
+  6. *Fixed Mode Interview Auto-Completion:* Answering the final question in fixed mode automatically completes the session and synthesizes the 5-dimension rubric performance report (`interview.controller.ts`).
+  7. *Test Isolation & AI Fallback Bypasses:* Gemini AI calls now immediately return empty strings in `test` mode (`adaptiveInterview.service.ts` and `interview.controller.ts`), ensuring offline, deterministic test execution with zero external network dependencies or API key requirements.
+  8. *Seamless UX Handoffs:* Added "Practice in Interview" action triggers directly from job match missing skills and personalized roadmap steps (`ResumePage.tsx`), automatically hydrating target skills and roles into the interview setup wizard (`InterviewPage.tsx`).
+- **Files Modified/Added:**
+  - `backend/src/controllers/analysis.controller.ts`
+  - `backend/src/controllers/dashboard.controller.ts`
+  - `backend/src/controllers/interview.controller.ts`
+  - `backend/src/controllers/progress.controller.ts`
+  - `backend/src/controllers/projectEvidence.controller.ts`
+  - `backend/src/controllers/resume.controller.ts`
+  - `backend/src/routes/projectEvidence.routes.ts`
+  - `backend/src/services/adaptiveInterview.service.ts`
+  - `backend/src/services/endToEndIntegration.service.test.ts`
+  - `frontend/src/features/projectEvidence/projectEvidence.service.ts`
+  - `frontend/src/pages/Interview/InterviewPage.tsx`
+  - `frontend/src/pages/Resume/ResumePage.tsx`
+- **Tests Added:**
+  - `backend/src/services/endToEndIntegration.service.test.ts`: 9 end-to-end integration tests verifying cross-phase pipelines (Job Match -> Roadmap -> Progress, Dependency DAG scheduling, Roadmap completion math, Project Evidence grounded interview handoff, Cross-user isolation, Adaptive question progression & report generation, Zero-inflation stats, and Empty JD handling).
+- **Exact Verification Commands & Results:**
+  - `node -r ts-node/register --test src/services/*.test.ts`: 12 test suites, 192 total tests passed, 0 failures, 0 skipped.
+  - `npm run build` (frontend): `tsc -b && vite build` succeeded with 0 TypeScript/bundler errors.
+- **Known Limitations Remaining:**
+  - Live Gemini AI and GitHub API interactions require valid `GEMINI_API_KEY` and optional `GITHUB_TOKEN` in `.env`. In testing and offline mode, deterministic heuristics and mock fallbacks are used.
+  - Resume upload requires either local disk upload directory or Cloudinary credentials.
+  - End-to-end browser user interactions (e.g. file selection dialogs) require manual execution or Playwright/Cypress end-to-end browser drivers.
+
 ---
 
 ## 19. Source File Reference Index
@@ -1364,7 +1427,7 @@ flowchart LR
 - [database.ts](file:///d:/coding/careerAI/backend/src/config/database.ts): Mongoose connection logic.
 - [cloudinary.ts](file:///d:/coding/careerAI/backend/src/config/cloudinary.ts): Cloudinary raw uploader with local disk fallback.
 
-### 19.2 Backend Services & Data (Algorithms)
+### 19.2 Backend Services & Data (Algorithms & Tests)
 - [skillTaxonomy.ts](file:///d:/coding/careerAI/backend/src/data/skills/skillTaxonomy.ts): Master taxonomy definitions, alias mappings, and weights.
 - [skillDependencyGraph.ts](file:///d:/coding/careerAI/backend/src/data/skills/skillDependencyGraph.ts): Master prerequisite dependency relationships and canonical graph definitions.
 - [resumeDocumentParser.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeDocumentParser.service.ts): PDF/DOCX file extractors, Unicode cleaner, and 10-section detector.
@@ -1382,6 +1445,7 @@ flowchart LR
 - [projectJobMatching.service.ts](file:///d:/coding/careerAI/backend/src/services/projectJobMatching.service.ts): Per-project job relevance and job value calculator.
 - [profileCompleteness.service.ts](file:///d:/coding/careerAI/backend/src/services/profileCompleteness.service.ts): Audit checks for required profile fields.
 - [ai.service.ts](file:///d:/coding/careerAI/backend/src/services/ai.service.ts): Google Gemini AI SDK integration with fallback logic.
+- [endToEndIntegration.service.test.ts](file:///d:/coding/careerAI/backend/src/services/endToEndIntegration.service.test.ts): End-to-end integration and cross-phase regression test suite.
 
 ### 19.3 Backend Controllers & Models
 - [auth.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/auth.controller.ts) / [User.ts](file:///d:/coding/careerAI/backend/src/models/User.ts): User authentication and model.

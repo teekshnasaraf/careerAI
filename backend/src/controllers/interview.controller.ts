@@ -23,7 +23,7 @@ const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 async function generateWithFallback(prompt: string): Promise<string> {
-  if (!ai) return "";
+  if (!ai || process.env.NODE_ENV === "test") return "";
   const models = ["gemini-2.0-flash", "models/gemma-4-26b-a4b-it", "gemini-2.0-flash-lite"];
   for (const model of models) {
     try {
@@ -61,18 +61,23 @@ export const startInterviewSession = async (req: Request, res: Response): Promis
 
     if (projectEvidenceId) {
       const pe = await ProjectEvidence.findOne({ _id: projectEvidenceId, user: req.userId });
-      if (pe) {
-        projectContextData = {
-          projectTitle: pe.projectTitle,
-          repositoryUrl: pe.repositoryUrl,
-          findingsSummary: pe.summary.observedStrengths.join("; ") || `Verified repository code (${pe.repo})`,
-          fileReference: pe.filesScanned[0]?.path,
-          primaryTechnologies: pe.summary.primaryTechnologies,
-        };
-        projectVerifiedSkills = pe.claimAssessments
-          .filter((c) => c.status === "supported" || c.status === "partially_supported")
-          .map((c) => c.skill);
+      if (!pe) {
+        res.status(404).json({
+          success: false,
+          message: "Specified project evidence not found or unauthorized.",
+        });
+        return;
       }
+      projectContextData = {
+        projectTitle: pe.projectTitle,
+        repositoryUrl: pe.repositoryUrl,
+        findingsSummary: pe.summary.observedStrengths.join("; ") || `Verified repository code (${pe.repo})`,
+        fileReference: pe.filesScanned[0]?.path,
+        primaryTechnologies: pe.summary.primaryTechnologies,
+      };
+      projectVerifiedSkills = pe.claimAssessments
+        .filter((c) => c.status === "supported" || c.status === "partially_supported")
+        .map((c) => c.skill);
     }
 
     const isAdaptiveMode =
@@ -98,13 +103,13 @@ export const startInterviewSession = async (req: Request, res: Response): Promis
     const parsedJd = activeJdText ? parseJobDescription(activeJdText) : null;
 
     const requiredSkills = parsedJd
-      ? parsedJd.requirements.filter((r) => r.priority === "required").map((r) => r.skill)
+      ? parsedJd.requirements.filter((r) => r.priority === "required").map((r) => r.name)
       : [];
     const preferredSkills = parsedJd
-      ? parsedJd.requirements.filter((r) => r.priority === "preferred").map((r) => r.skill)
+      ? parsedJd.requirements.filter((r) => r.priority === "preferred").map((r) => r.name)
       : [];
     const unspecifiedSkills = parsedJd
-      ? parsedJd.requirements.filter((r) => r.priority === "unspecified").map((r) => r.skill)
+      ? parsedJd.requirements.filter((r) => r.priority === "unspecified").map((r) => r.name)
       : [];
 
     const effectiveRole = targetRole || roadmap?.jobTitle || "Full Stack Engineer";
@@ -466,7 +471,45 @@ export const submitQuestionAnswer = async (req: Request, res: Response): Promise
       return;
     }
 
-    // Non-adaptive fixed mock interview: simply persist response
+    // Non-adaptive fixed mock interview: check if all questions are now answered
+    if (session.responses.length >= session.questions.length) {
+      const pastSessions = await InterviewSession.find({
+        user: req.userId,
+        status: "completed",
+        _id: { $ne: session._id },
+      })
+        .sort({ createdAt: -1 })
+        .limit(10);
+
+      const report = synthesizeAdaptiveInterviewReport({
+        targetRole: session.targetRole,
+        targetCompany: session.targetCompany,
+        allTargetSkills: session.targetSkills && session.targetSkills.length > 0
+          ? session.targetSkills
+          : session.questions.map((q) => q.skill || q.category).filter(Boolean),
+        responses: session.responses,
+        historicalSessions: pastSessions,
+      });
+
+      session.overallScore = report.overallScore;
+      session.status = "completed";
+      session.report = report;
+      await session.save();
+
+      res.status(200).json({
+        success: true,
+        message: "Interview finished and final report generated",
+        data: {
+          sessionId: session._id,
+          evaluation: responseEntry,
+          isFinished: true,
+          report,
+          session,
+        },
+      });
+      return;
+    }
+
     await session.save();
 
     res.status(200).json({
@@ -475,6 +518,8 @@ export const submitQuestionAnswer = async (req: Request, res: Response): Promise
       data: {
         sessionId: session._id,
         evaluation: responseEntry,
+        isFinished: false,
+        session,
       },
     });
   } catch (error) {

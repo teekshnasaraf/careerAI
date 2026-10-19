@@ -307,6 +307,14 @@ export const deleteResume = async (
       }
     }
 
+    // Clean up associated Analysis document for this user so stale scores don't linger
+    const Analysis = require("../models/Analysis").default;
+    await Analysis.deleteMany({ user: req.userId });
+
+    // Clean up or dissociate ProjectEvidence linked to this deleted resume
+    const ProjectEvidence = require("../models/ProjectEvidence").default;
+    await ProjectEvidence.deleteMany({ user: req.userId, resumeId: id });
+
     // Clear user resumeUrl
     await User.findByIdAndUpdate(req.userId, {
       resumeUrl: "",

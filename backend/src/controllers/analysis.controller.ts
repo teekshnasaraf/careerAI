@@ -25,7 +25,10 @@ export const getLatestAnalysis = async (
       return;
     }
 
-    let analysis = await Analysis.findOne({ user: req.userId }).sort({
+    let analysis = await Analysis.findOne({
+      user: req.userId,
+      resumeId: resume._id,
+    }).sort({
       updatedAt: -1,
     });
 

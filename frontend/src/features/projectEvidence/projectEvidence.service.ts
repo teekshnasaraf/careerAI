@@ -124,6 +124,13 @@ export const getAllUserProjectEvidenceApi = async (): Promise<{
   return response.data;
 };
 
+export const getProjectEvidenceByIdApi = async (
+  id: string
+): Promise<{ success: boolean; data: ProjectEvidenceData }> => {
+  const response = await api.get(`/project-evidence/${id}`);
+  return response.data;
+};
+
 export const deleteProjectEvidenceApi = async (
   id: string
 ): Promise<{ success: boolean; message: string }> => {

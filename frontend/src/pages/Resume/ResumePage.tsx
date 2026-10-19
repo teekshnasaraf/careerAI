@@ -34,6 +34,7 @@ import {
   ShieldCheck,
   Boxes,
   Cpu,
+  Video,
 } from "lucide-react";
 
 import ResumeUploadCard, { formatFileSize } from "../../components/resume/ResumeUploadCard";
@@ -1634,9 +1635,20 @@ Example:
                                     {item.priority} (Weight {item.priorityWeight})
                                   </span>
                                 </div>
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
-                                  +{item.potentialScoreImpact}% potential boost
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
+                                    +{item.potentialScoreImpact}% potential boost
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => navigate("/interview", { state: { targetSkill: item.name, targetRole: "Full Stack Engineer" } })}
+                                    className="inline-flex items-center gap-1 rounded-lg bg-purple-50 px-2 py-0.5 text-xs font-semibold text-purple-700 hover:bg-purple-100 border border-purple-200 transition"
+                                    title="Practice in Mock Interview"
+                                  >
+                                    <Video size={12} />
+                                    <span>Practice</span>
+                                  </button>
+                                </div>
                               </div>
                               <p className="mt-2 text-xs text-gray-600 pl-8">
                                 {item.recommendation}
@@ -2030,6 +2042,15 @@ Example:
                                           >
                                             <Check size={12} />
                                             Completed
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => navigate("/interview", { state: { targetSkill: step.skillName, targetRole: roadmap?.targetRole } })}
+                                            className="rounded-lg px-2.5 py-1 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 transition flex items-center gap-1"
+                                            title="Practice this skill in Mock Interview"
+                                          >
+                                            <Video size={12} />
+                                            <span>Interview</span>
                                           </button>
                                         </div>
                                       </div>

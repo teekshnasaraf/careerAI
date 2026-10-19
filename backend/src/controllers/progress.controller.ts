@@ -15,8 +15,8 @@ export const getProgressStats = async (
     const interviews = await InterviewSession.find({ user: req.userId }).sort({ createdAt: -1 });
     const activeRoadmap = await Roadmap.findOne({ user: req.userId }).sort({ updatedAt: -1 });
 
-    const currentResumeScore = analysis?.resumeScore || resume?.atsScore || 0;
-    const currentAtsScore = analysis?.atsScore || resume?.atsScore || 0;
+    const currentResumeScore = resume ? (analysis?.resumeScore || resume?.atsScore || 0) : 0;
+    const currentAtsScore = resume ? (analysis?.atsScore || resume?.atsScore || 0) : 0;
 
     const completedInterviews = interviews.filter((i) => i.status === "completed");
     const totalInterviewScoreSum = completedInterviews.reduce((sum, i) => sum + i.overallScore, 0);

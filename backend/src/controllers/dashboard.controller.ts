@@ -18,14 +18,14 @@ export const getDashboardStats = async (
     const sessions = await InterviewSession.find({ user: req.userId });
 
     const resumeUploaded = Boolean(resume);
-    const resumeScore = analysis?.resumeScore || resume?.atsScore || 0;
-    const atsScore = analysis?.atsScore || resume?.atsScore || 0;
+    const resumeScore = resumeUploaded ? (analysis?.resumeScore || resume?.atsScore || 0) : 0;
+    const atsScore = resumeUploaded ? (analysis?.atsScore || resume?.atsScore || 0) : 0;
     const interviewCount = sessions.filter((s) => s.status === "completed").length;
     const questionsPracticed = sessions.flatMap((s) => s.responses).length;
     const lastResumeUpload = resume?.createdAt ? resume.createdAt.toISOString() : null;
-    const lastAnalysisDate = analysis?.updatedAt ? analysis.updatedAt.toISOString() : null;
-    const targetRole = analysis?.targetRole || "Full Stack Engineer";
-    const skillGapCount = analysis?.skillGapAnalysis?.missingSkills?.length || analysis?.missingSkills?.length || 0;
+    const lastAnalysisDate = resumeUploaded && analysis?.updatedAt ? analysis.updatedAt.toISOString() : null;
+    const targetRole = resumeUploaded ? (analysis?.targetRole || "Full Stack Engineer") : "Software Engineer";
+    const skillGapCount = resumeUploaded ? (analysis?.skillGapAnalysis?.missingSkills?.length || analysis?.missingSkills?.length || 0) : 0;
 
     res.status(200).json({
       success: true,
