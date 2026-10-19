@@ -26,11 +26,22 @@ import {
   ListFilter,
   ChevronDown,
   ChevronUp,
+  GitBranch,
+  Compass,
+  BookOpen,
 } from "lucide-react";
 
 import ResumeUploadCard, { formatFileSize } from "../../components/resume/ResumeUploadCard";
 import { getLatestResumeApi, deleteResumeApi } from "../../features/resume/resume.service";
-import { matchJobDescriptionApi, type JobMatchResult, type ProjectJobRelevance } from "../../features/jobs/jobs.service";
+import {
+  matchJobDescriptionApi,
+  generateJobRoadmapApi,
+  getActiveRoadmapApi,
+  updateRoadmapStepStatusApi,
+  type JobMatchResult,
+  type ProjectJobRelevance,
+  type PersonalizedRoadmap,
+} from "../../features/jobs/jobs.service";
 import type { ResumeData } from "../../types/resume";
 import axios from "axios";
 
@@ -50,6 +61,16 @@ function ResumePage() {
   const [projectRelevance, setProjectRelevance] = useState<ProjectJobRelevance[] | null>(null);
   const [requirementFilter, setRequirementFilter] = useState<"all" | "matched" | "missing">("all");
   const [showCalculationDetails, setShowCalculationDetails] = useState(true);
+
+  // Roadmap State
+  const [roadmap, setRoadmap] = useState<PersonalizedRoadmap | null>(null);
+  const [generatingRoadmap, setGeneratingRoadmap] = useState(false);
+  const [roadmapError, setRoadmapError] = useState<string | null>(null);
+  const [roadmapWarning, setRoadmapWarning] = useState<string | null>(null);
+  const [roadmapView, setRoadmapView] = useState<"steps" | "graph">("steps");
+  const [selectedPhaseFilter, setSelectedPhaseFilter] = useState<number | "all">("all");
+  const [updatingStepSkill, setUpdatingStepSkill] = useState<string | null>(null);
+  const [expandedStep, setExpandedStep] = useState<number | null>(null);
 
   const fetchResume = async () => {
     try {
@@ -71,6 +92,17 @@ function ResumePage() {
 
   useEffect(() => {
     fetchResume();
+    const fetchActiveRoadmap = async () => {
+      try {
+        const res = await getActiveRoadmapApi();
+        if (res.success && res.data) {
+          setRoadmap(res.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch active roadmap:", err);
+      }
+    };
+    fetchActiveRoadmap();
   }, []);
 
   const handleUploadSuccess = (newResume: ResumeData) => {
@@ -143,6 +175,58 @@ function ResumePage() {
       }
     } finally {
       setMatchingJob(false);
+    }
+  };
+
+  const handleGenerateRoadmap = async () => {
+    if (!jobDescriptionInput.trim()) {
+      setJobMatchError("Please enter a job description to generate a learning roadmap.");
+      return;
+    }
+    try {
+      setGeneratingRoadmap(true);
+      setRoadmapError(null);
+      setRoadmapWarning(null);
+      const res = await generateJobRoadmapApi(jobDescriptionInput, resume?._id);
+      if (res.success && res.data.roadmap) {
+        setRoadmap(res.data.roadmap);
+        if (res.data.match) {
+          setJobMatchResult(res.data.match);
+        }
+      } else {
+        setRoadmapError(res.message || "Failed to generate learning roadmap.");
+      }
+    } catch (err: unknown) {
+      console.error("Failed to generate roadmap:", err);
+      if (axios.isAxiosError(err)) {
+        setRoadmapError(err.response?.data?.message || "Failed to generate learning roadmap");
+      } else {
+        setRoadmapError("Failed to generate learning roadmap");
+      }
+    } finally {
+      setGeneratingRoadmap(false);
+    }
+  };
+
+  const handleUpdateStepStatus = async (
+    skillName: string,
+    newStatus: "not_started" | "in_progress" | "completed"
+  ) => {
+    if (!roadmap?._id) return;
+    try {
+      setUpdatingStepSkill(skillName);
+      setRoadmapWarning(null);
+      const res = await updateRoadmapStepStatusApi(roadmap._id, skillName, newStatus);
+      if (res.success && res.data) {
+        setRoadmap(res.data);
+        if (res.warning) {
+          setRoadmapWarning(res.warning);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to update step status:", err);
+    } finally {
+      setUpdatingStepSkill(null);
     }
   };
 
@@ -811,10 +895,10 @@ Example:
                     </div>
                   )}
 
-                  <div className="flex justify-end">
+                  <div className="flex justify-end gap-3 flex-wrap">
                     <button
                       onClick={handleMatchJob}
-                      disabled={matchingJob}
+                      disabled={matchingJob || generatingRoadmap}
                       className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-200 transition hover:bg-blue-700 disabled:opacity-50 active:scale-95"
                     >
                       {matchingJob ? (
@@ -829,8 +913,33 @@ Example:
                         </>
                       )}
                     </button>
+
+                    <button
+                      onClick={handleGenerateRoadmap}
+                      disabled={matchingJob || generatingRoadmap}
+                      className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-purple-200 transition hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 active:scale-95"
+                    >
+                      {generatingRoadmap ? (
+                        <>
+                          <Loader2 size={16} className="animate-spin" />
+                          Building Graph & Roadmap...
+                        </>
+                      ) : (
+                        <>
+                          <Compass size={16} />
+                          Generate Learning Roadmap
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
+
+                {roadmapError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-medium text-red-700 flex items-center gap-2">
+                    <AlertTriangle size={16} className="text-red-500 flex-shrink-0" />
+                    <span>{roadmapError}</span>
+                  </div>
+                )}
 
                 {/* Match Results Display */}
                 {jobMatchResult && (
@@ -1089,16 +1198,37 @@ Example:
                     {/* Prioritized Missing Skills (Action Plan) */}
                     {jobMatchResult.prioritizedMissingSkills && jobMatchResult.prioritizedMissingSkills.length > 0 ? (
                       <div className="rounded-2xl border border-red-100 bg-white p-6 shadow-sm space-y-4">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600">
-                            <TrendingUp size={18} />
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600">
+                              <TrendingUp size={18} />
+                            </div>
+                            <div>
+                              <h4 className="text-base font-bold text-gray-900">Prioritized Missing Skills (Action Plan)</h4>
+                              <p className="text-xs text-gray-500">
+                                Ranked by priority category and potential match score impact so you know which skills to address first.
+                              </p>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="text-base font-bold text-gray-900">Prioritized Missing Skills (Action Plan)</h4>
-                            <p className="text-xs text-gray-500">
-                              Ranked by priority category and potential match score impact so you know which skills to address first.
-                            </p>
-                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleGenerateRoadmap}
+                            disabled={generatingRoadmap}
+                            className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 active:scale-95 flex-shrink-0"
+                          >
+                            {generatingRoadmap ? (
+                              <>
+                                <Loader2 size={14} className="animate-spin" />
+                                Building Roadmap...
+                              </>
+                            ) : (
+                              <>
+                                <Compass size={14} />
+                                Build Learning Roadmap
+                              </>
+                            )}
+                          </button>
                         </div>
 
                         <div className="space-y-3 pt-2">
@@ -1304,7 +1434,418 @@ Example:
                       )}
                     </div>
 
-                    {/* Additional Resume Skills */}
+                    {/* Intelligent Learning Roadmap & Skill Dependency Graph Panel */}
+                    {roadmap && (
+                      <div className="rounded-2xl border border-purple-100 bg-white p-6 shadow-sm space-y-6">
+                        {/* Roadmap Header & Progress */}
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-purple-100 text-purple-700">
+                                <Compass size={18} />
+                              </div>
+                              <h4 className="text-lg font-bold text-gray-900">
+                                Intelligent Learning Roadmap & Skill Dependency Graph
+                              </h4>
+                            </div>
+                            <p className="text-xs text-gray-500">
+                              Topologically sorted learning sequence using CareerAI's DAG. Prerequisites are scheduled before dependent job requirements.
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex items-center rounded-xl bg-gray-100 p-1 text-xs font-semibold">
+                              <button
+                                type="button"
+                                onClick={() => setRoadmapView("steps")}
+                                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition ${
+                                  roadmapView === "steps"
+                                    ? "bg-white text-gray-900 shadow-sm"
+                                    : "text-gray-500 hover:text-gray-900"
+                                }`}
+                              >
+                                <BookOpen size={14} />
+                                Ordered Steps ({roadmap.steps.length})
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setRoadmapView("graph")}
+                                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 transition ${
+                                  roadmapView === "graph"
+                                    ? "bg-white text-purple-700 shadow-sm"
+                                    : "text-gray-500 hover:text-gray-900"
+                                }`}
+                              >
+                                <GitBranch size={14} />
+                                Dependency Graph ({roadmap.graph?.nodes?.length || roadmap.steps.length})
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Warning Notification if any */}
+                        {roadmapWarning && (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-center gap-2">
+                            <Info size={16} className="text-amber-600 flex-shrink-0" />
+                            <span>{roadmapWarning}</span>
+                          </div>
+                        )}
+
+                        {/* Progress Bar & Metric Pills */}
+                        <div className="rounded-xl bg-gradient-to-r from-purple-50/70 via-indigo-50/50 to-blue-50/70 border border-purple-100 p-5 space-y-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Overall Roadmap Completion</span>
+                              <div className="text-2xl font-extrabold text-purple-700 mt-0.5">
+                                {roadmap.completionPercentage}% Complete
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap text-xs">
+                              <span className="rounded-lg bg-white/80 border border-purple-100 px-3 py-1 font-semibold text-gray-700">
+                                {roadmap.completedSteps} of {roadmap.totalSteps} steps completed
+                              </span>
+                              <span className="rounded-lg bg-red-50 border border-red-100 px-3 py-1 font-semibold text-red-700">
+                                {roadmap.targetMissingSkillsCount} target job skills
+                              </span>
+                              <span className="rounded-lg bg-amber-50 border border-amber-100 px-3 py-1 font-semibold text-amber-700">
+                                {roadmap.unmetPrerequisitesCount} unmet prerequisites
+                              </span>
+                              {roadmap.demonstratedPrerequisitesCount > 0 && (
+                                <span className="rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-1 font-semibold text-emerald-700">
+                                  {roadmap.demonstratedPrerequisitesCount} already demonstrated
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Progress Bar */}
+                          <div className="w-full bg-gray-200/80 rounded-full h-3 overflow-hidden shadow-inner">
+                            <div
+                              className="bg-gradient-to-r from-purple-600 to-indigo-600 h-3 rounded-full transition-all duration-500 shadow-sm"
+                              style={{ width: `${Math.min(100, Math.max(2, roadmap.completionPercentage))}%` }}
+                            ></div>
+                          </div>
+
+                          <p className="text-xs text-gray-600">
+                            {roadmap.rationale}
+                          </p>
+                        </div>
+
+                        {/* VIEW 1: ORDERED LEARNING STEPS */}
+                        {roadmapView === "steps" && (
+                          <div className="space-y-4">
+                            {/* Phase Filter Tabs */}
+                            {roadmap.phases && roadmap.phases.length > 1 && (
+                              <div className="flex flex-wrap gap-2 pt-1 border-b border-gray-100 pb-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPhaseFilter("all")}
+                                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                                    selectedPhaseFilter === "all"
+                                      ? "bg-purple-600 text-white shadow-sm"
+                                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                  }`}
+                                >
+                                  All Phases ({roadmap.steps.length})
+                                </button>
+                                {roadmap.phases.map((ph) => (
+                                  <button
+                                    key={ph.phaseNumber}
+                                    type="button"
+                                    onClick={() => setSelectedPhaseFilter(ph.phaseNumber)}
+                                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                                      selectedPhaseFilter === ph.phaseNumber
+                                        ? "bg-purple-600 text-white shadow-sm"
+                                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                                    }`}
+                                  >
+                                    {ph.title} ({ph.stepCount})
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* Steps List */}
+                            <div className="space-y-4">
+                              {roadmap.steps
+                                .filter((s) => selectedPhaseFilter === "all" || s.phase === selectedPhaseFilter)
+                                .map((step) => {
+                                  const isExpanded = expandedStep === step.stepNumber;
+                                  const isUpdating = updatingStepSkill === step.skillName;
+
+                                  return (
+                                    <div
+                                      key={step.skillName}
+                                      className={`rounded-xl border p-5 transition-all shadow-sm ${
+                                        step.status === "completed"
+                                          ? "border-emerald-200 bg-emerald-50/20"
+                                          : step.status === "in_progress"
+                                          ? "border-blue-200 bg-blue-50/20"
+                                          : "border-gray-100 bg-white"
+                                      }`}
+                                    >
+                                      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                                        <div className="flex items-center gap-3">
+                                          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white shadow-sm flex-shrink-0">
+                                            #{step.stepNumber}
+                                          </span>
+                                          <div>
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <h5 className="text-base font-bold text-gray-900">{step.skillName}</h5>
+                                              <span className="rounded-md bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+                                                {step.category}
+                                              </span>
+                                              <span
+                                                className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                                  step.priority === "required"
+                                                    ? "bg-red-50 text-red-700 border border-red-200"
+                                                    : step.priority === "prerequisite"
+                                                    ? "bg-amber-50 text-amber-800 border border-amber-200"
+                                                    : step.priority === "unspecified"
+                                                    ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                                    : "bg-blue-50 text-blue-700 border border-blue-200"
+                                                }`}
+                                              >
+                                                {step.priority === "prerequisite" ? "Prerequisite Foundation" : `${step.priority} requirement`}
+                                              </span>
+                                            </div>
+                                            <p className="mt-1 text-xs text-gray-600">{step.reason}</p>
+                                          </div>
+                                        </div>
+
+                                        {/* Status Toggle Buttons */}
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <button
+                                            type="button"
+                                            disabled={isUpdating}
+                                            onClick={() => handleUpdateStepStatus(step.skillName, "not_started")}
+                                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                                              step.status === "not_started"
+                                                ? "bg-gray-200 text-gray-800 shadow-sm"
+                                                : "text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+                                            }`}
+                                          >
+                                            Not Started
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={isUpdating}
+                                            onClick={() => handleUpdateStepStatus(step.skillName, "in_progress")}
+                                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                                              step.status === "in_progress"
+                                                ? "bg-blue-600 text-white shadow-sm"
+                                                : "text-gray-400 hover:text-blue-600 hover:bg-blue-50"
+                                            }`}
+                                          >
+                                            In Progress
+                                          </button>
+                                          <button
+                                            type="button"
+                                            disabled={isUpdating}
+                                            onClick={() => handleUpdateStepStatus(step.skillName, "completed")}
+                                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold flex items-center gap-1 transition ${
+                                              step.status === "completed"
+                                                ? "bg-emerald-600 text-white shadow-sm"
+                                                : "text-gray-400 hover:text-emerald-600 hover:bg-emerald-50"
+                                            }`}
+                                          >
+                                            <Check size={12} />
+                                            Completed
+                                          </button>
+                                        </div>
+                                      </div>
+
+                                      {/* Prerequisites & Unlocks Badges */}
+                                      <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                                        <div className="rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-1 text-gray-600">
+                                          <span className="font-semibold text-gray-700">Requires: </span>
+                                          {step.prerequisites && step.prerequisites.length > 0
+                                            ? step.prerequisites.join(", ")
+                                            : "None (Foundational)"}
+                                        </div>
+                                        {step.unlockedSkills && step.unlockedSkills.length > 0 && (
+                                          <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-2.5 py-1 text-indigo-700 font-semibold">
+                                            Unlocks: {step.unlockedSkills.join(", ")}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      {/* Expand/Collapse Toggle */}
+                                      <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
+                                        <button
+                                          type="button"
+                                          onClick={() => setExpandedStep(isExpanded ? null : step.stepNumber)}
+                                          className="text-xs font-semibold text-purple-600 hover:text-purple-700 flex items-center gap-1"
+                                        >
+                                          {isExpanded ? (
+                                            <>
+                                              <span>Hide Learning Plan</span>
+                                              <ChevronUp size={14} />
+                                            </>
+                                          ) : (
+                                            <>
+                                              <span>View Learning Objective, Exercise & Deliverable</span>
+                                              <ChevronDown size={14} />
+                                            </>
+                                          )}
+                                        </button>
+                                        <span className="text-[11px] text-gray-400">
+                                          {step.phaseTitle}
+                                        </span>
+                                      </div>
+
+                                      {/* Expanded Educational Content */}
+                                      {isExpanded && (
+                                        <div className="mt-4 pt-4 border-t border-gray-100 space-y-4 text-xs">
+                                          {/* Learning Objective */}
+                                          <div className="rounded-lg bg-purple-50/50 border border-purple-100 p-3">
+                                            <span className="font-bold text-purple-900 block mb-1">Learning Objective:</span>
+                                            <p className="text-purple-800">{step.learningObjective}</p>
+                                          </div>
+
+                                          {/* Practical Exercise & Project Deliverable */}
+                                          <div className="grid gap-3 sm:grid-cols-2">
+                                            <div className="rounded-lg bg-slate-50 border border-slate-200/80 p-3">
+                                              <span className="font-bold text-slate-900 block mb-1">Hands-On Practice Exercise:</span>
+                                              <p className="text-slate-700">{step.practicalExercise}</p>
+                                            </div>
+                                            <div className="rounded-lg bg-emerald-50/50 border border-emerald-100 p-3">
+                                              <span className="font-bold text-emerald-900 block mb-1">Portfolio Project Deliverable:</span>
+                                              <p className="text-emerald-800">{step.projectDeliverable}</p>
+                                            </div>
+                                          </div>
+
+                                          {/* Suggested Activities & Completion Criteria */}
+                                          <div className="rounded-lg bg-gray-50 border border-gray-100 p-3 space-y-2">
+                                            <span className="font-bold text-gray-800 block">Suggested Study Activities:</span>
+                                            <ul className="list-disc pl-4 space-y-1 text-gray-600">
+                                              {step.suggestedActivities && step.suggestedActivities.map((act, aIdx) => (
+                                                <li key={aIdx}>{act}</li>
+                                              ))}
+                                            </ul>
+                                            <div className="pt-1 text-[11px] text-gray-500">
+                                              <span className="font-semibold text-gray-700">Completion Criteria: </span>
+                                              {step.completionCriteria}
+                                            </div>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* VIEW 2: INTERACTIVE SKILL DEPENDENCY GRAPH */}
+                        {roadmapView === "graph" && (
+                          <div className="space-y-4">
+                            {/* Legend */}
+                            <div className="flex flex-wrap items-center gap-3 text-xs bg-gray-50 border border-gray-100 p-3 rounded-xl">
+                              <span className="font-bold text-gray-700">Graph Legend:</span>
+                              <span className="flex items-center gap-1.5 text-emerald-700">
+                                <span className="h-3 w-3 rounded-full bg-emerald-500"></span>
+                                Completed ({roadmap.completedSteps})
+                              </span>
+                              <span className="flex items-center gap-1.5 text-blue-700">
+                                <span className="h-3 w-3 rounded-full bg-blue-500"></span>
+                                In Progress
+                              </span>
+                              <span className="flex items-center gap-1.5 text-red-600">
+                                <span className="h-3 w-3 rounded-full bg-red-400"></span>
+                                Direct Job Requirement
+                              </span>
+                              <span className="flex items-center gap-1.5 text-amber-600">
+                                <span className="h-3 w-3 rounded-full bg-amber-400"></span>
+                                Discovered Prerequisite
+                              </span>
+                            </div>
+
+                            {/* Nodes Grid */}
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                              {roadmap.graph && roadmap.graph.nodes && roadmap.graph.nodes.map((node) => {
+                                return (
+                                  <div
+                                    key={node.name}
+                                    className={`rounded-xl border p-4 space-y-2 transition ${
+                                      node.status === "completed"
+                                        ? "border-emerald-300 bg-emerald-50/40"
+                                        : node.status === "in_progress"
+                                        ? "border-blue-300 bg-blue-50/40"
+                                        : node.isJobRequirement
+                                        ? "border-red-100 bg-white"
+                                        : "border-amber-100 bg-amber-50/20"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-sm font-bold text-gray-900">{node.name}</span>
+                                      <span
+                                        className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                          node.status === "completed"
+                                            ? "bg-emerald-100 text-emerald-800"
+                                            : node.status === "in_progress"
+                                            ? "bg-blue-100 text-blue-800"
+                                            : node.isJobRequirement
+                                            ? "bg-red-50 text-red-700 border border-red-200"
+                                            : "bg-amber-50 text-amber-700 border border-amber-200"
+                                        }`}
+                                      >
+                                        {node.status === "completed"
+                                          ? "Completed"
+                                          : node.status === "in_progress"
+                                          ? "In Progress"
+                                          : node.isJobRequirement
+                                          ? "Target Job Skill"
+                                          : "Prerequisite"}
+                                      </span>
+                                    </div>
+
+                                    <div className="text-xs text-gray-500">
+                                      Category: <span className="font-semibold text-gray-700">{node.category}</span>
+                                    </div>
+
+                                    {/* Prerequisite & Unlocked relationships */}
+                                    <div className="space-y-1 text-[11px] pt-1 border-t border-gray-100">
+                                      {node.prerequisites && node.prerequisites.length > 0 && (
+                                        <div className="text-gray-600">
+                                          <span className="font-medium text-gray-700">Requires: </span>
+                                          {node.prerequisites.join(", ")}
+                                        </div>
+                                      )}
+                                      {node.dependents && node.dependents.length > 0 && (
+                                        <div className="text-purple-700">
+                                          <span className="font-medium">Unlocks: </span>
+                                          {node.dependents.join(", ")}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Directed Edges List */}
+                            {roadmap.graph && roadmap.graph.edges && roadmap.graph.edges.length > 0 && (
+                              <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4 space-y-2">
+                                <span className="text-xs font-bold text-gray-700">Directed Prerequisite Dependencies:</span>
+                                <div className="flex flex-wrap gap-2 pt-1">
+                                  {roadmap.graph.edges.map((edge, eIdx) => (
+                                    <span
+                                      key={eIdx}
+                                      className="inline-flex items-center gap-1.5 rounded-lg bg-white border border-gray-200 px-2.5 py-1 text-xs text-gray-700 font-medium shadow-2xs"
+                                    >
+                                      <span className="font-semibold text-slate-800">{edge.from}</span>
+                                      <ArrowRight size={12} className="text-purple-500" />
+                                      <span className="font-semibold text-indigo-700">{edge.to}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {jobMatchResult.additionalResumeSkills.length > 0 && (
                       <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
                         <div className="flex items-center justify-between">

@@ -3,6 +3,7 @@ import Resume from "../models/Resume";
 import Analysis from "../models/Analysis";
 import InterviewSession from "../models/InterviewSession";
 import Progress from "../models/Progress";
+import Roadmap from "../models/Roadmap";
 
 export const getProgressStats = async (
   req: Request,
@@ -12,6 +13,7 @@ export const getProgressStats = async (
     const resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
     const analysis = await Analysis.findOne({ user: req.userId }).sort({ updatedAt: -1 });
     const interviews = await InterviewSession.find({ user: req.userId }).sort({ createdAt: -1 });
+    const activeRoadmap = await Roadmap.findOne({ user: req.userId }).sort({ updatedAt: -1 });
 
     const currentResumeScore = analysis?.resumeScore || resume?.atsScore || 0;
     const currentAtsScore = analysis?.atsScore || resume?.atsScore || 0;
@@ -120,7 +122,10 @@ export const getProgressStats = async (
         currentResumeScore,
         currentAtsScore,
         interviewAverage,
-        roadmapCompletion: Math.min(90, Math.max(20, (resume ? 40 : 0) + (analysis ? 30 : 0) + (questionsSolved > 0 ? 20 : 0))),
+        roadmapCompletion:
+          activeRoadmap != null
+            ? activeRoadmap.completionPercentage
+            : Math.min(90, Math.max(20, (resume ? 40 : 0) + (analysis ? 30 : 0) + (questionsSolved > 0 ? 20 : 0))),
         questionsSolved,
         skillsMastered: resume?.parsedData?.skills?.length || 0,
         projectsCompleted: resume?.parsedData?.projects?.length || 0,

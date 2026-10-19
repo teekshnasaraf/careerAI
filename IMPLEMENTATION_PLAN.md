@@ -37,7 +37,8 @@ To maintain strict documentation integrity, the repository has been audited dire
 | **Mock Interview System** | **Fully Implemented** | Session lifecycle, personalized question generation, multi-criteria answer evaluation, and comprehensive completion reports in [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts). |
 | **User Authentication & Authorization** | **Fully Implemented** | Bcrypt hashing, JWT issuance/verification, Zod request body validation in [auth.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/auth.controller.ts) and [auth.middleware.ts](file:///d:/coding/careerAI/backend/src/middleware/auth.middleware.ts). |
 | **Cloud File Storage** | **Fully Implemented** | Cloudinary raw resource upload with local disk fallback in [cloudinary.ts](file:///d:/coding/careerAI/backend/src/config/cloudinary.ts). |
-| **Progress & Dashboard Analytics** | **Partially Implemented** | Live resume and interview progress aggregation in controllers; interview count and question count in dashboard stats currently static/defaulted in [dashboard.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/dashboard.controller.ts). |
+| **Skill Dependency Graph & Roadmap** | **Fully Implemented** | Directed acyclic graph (DAG) cycle detection (3-color DFS), topological sorting (Kahn's algorithm with priority tie-breaking), transitive dependency expansion, and interactive personalized roadmap tracking in [skillGraph.service.ts](file:///d:/coding/careerAI/backend/src/services/skillGraph.service.ts), [roadmap.service.ts](file:///d:/coding/careerAI/backend/src/services/roadmap.service.ts), and [Roadmap.ts](file:///d:/coding/careerAI/backend/src/models/Roadmap.ts). |
+| **Progress & Dashboard Analytics** | **Fully Implemented** | Live resume, interview progress, and active learning roadmap completion percentage aggregation in [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts). |
 | **PostgreSQL / Prisma ORM** | **Absent / Not Implemented** | Mentioned in legacy root `README.md`, but the codebase actually uses **MongoDB with Mongoose**. |
 | **Email Verification / Password Reset** | **Planned / Absent** | `nodemailer` dependency is installed in `backend/package.json`, but no mail transport or reset token routes exist. |
 
@@ -604,9 +605,144 @@ The system provides comprehensive mathematical transparency, requirement-level e
 
 ---
 
-## 8. AI Integration Pipeline
+## 8. Skill Dependency Graph & Intelligent Learning Roadmap (Phase 2 Implementation)
 
-### 8.1 Integration Details
+### 8.1 Architecture & Workflow
+
+Phase 2 extends CareerAI from identifying missing job skills to generating a mathematically validated, topologically ordered, personalized learning roadmap that accounts for prerequisites, candidate existing skills, and job requirement priorities.
+
+```mermaid
+flowchart TD
+    JobMatch[Job Match Engine Output: missingSkills & matchedSkills] --> ExtractTargets[Extract Target Skills & Priority Levels]
+    ExtractTargets --> CuratedGraph[Curated Skill Dependency Graph: skillDependencyGraph.ts]
+    
+    subgraph GraphValidation ["Deterministic Graph Processing (skillGraph.service.ts)"]
+        CuratedGraph --> DAGCheck["Cycle Detection: 3-Color DFS (White/Gray/Black)"]
+        DAGCheck --> TransitiveExp["Transitive Upstream Expansion (visitUpstream with recursion guard)"]
+        TransitiveExp --> ExcludeDemonstrated["Filter Out Candidate Demonstrated Skills"]
+        ExcludeDemonstrated --> DeduplicatePrereqs["Deduplicate Shared Prerequisites"]
+        DeduplicatePrereqs --> KahnSort["Topological Sort: Kahn's Algorithm + Deterministic Tie-Breaking"]
+    end
+
+    KahnSort --> OrderedSequence[Ordered Skill Sequence: Prerequisites Before Dependents]
+    
+    subgraph RoadmapGeneration ["Roadmap Synthesis (roadmap.service.ts)"]
+        OrderedSequence --> PhaseAssignment[Assign 4 Pedagogical Phases]
+        PhaseAssignment --> ContentSynthesis[Attach Practical Exercises, Deliverables & Criteria]
+        ContentSynthesis --> AIOrFallback["Deterministic Fallback Engine (Gemini Offline Safe)"]
+    end
+
+    RoadmapGeneration --> MongoDBRoadmap[(MongoDB Roadmap Document)]
+    MongoDBRoadmap --> DualViewUI[Frontend Dual-View: Ordered Roadmap + Interactive SVG Graph]
+    DualViewUI --> InteractiveStatus[Interactive Status Toggling: not_started / in_progress / completed]
+    InteractiveStatus --> ProgressSync[Recalculate Completion % & Sync with Progress Analytics]
+```
+
+### 8.2 Graph Representation & Curated Taxonomy Relationships
+
+The skill dependency graph models skills as nodes and prerequisite requirements as directed edges ($A \rightarrow B$, where $A$ must be mastered before $B$ can be effectively learned).
+
+1. **Graph Node Schema (`SkillGraphNode`):**
+   - `canonicalName`: Standardized taxonomy skill name (normalized from aliases).
+   - `category`: Taxonomy category (e.g., `Programming Languages`, `Web Technologies`, `Databases`).
+   - `acquired`: Boolean indicating if candidate's resume provides verified evidence of the skill.
+   - `jobRequirementLevel`: Direct job requirement status (`required`, `preferred`, `unspecified`, or `none` for indirect prerequisites).
+   - `isPrerequisite`: Boolean indicating if other skills in the roadmap or taxonomy depend on this node.
+   - `learningStatus`: Interactive progress status (`not_started`, `in_progress`, `completed`).
+   - `prerequisites`: Array of canonical prerequisite skill names.
+   - `unlocks`: Array of downstream skills made accessible by mastering this node.
+
+2. **Curated Prerequisite Data Source (`skillDependencyGraph.ts`):**
+   - All relationships are curated from industry software engineering curricula and standard pedagogical dependencies.
+   - Pre-mapped across all canonical skills in `SKILL_TAXONOMY` (e.g., `JavaScript` $\rightarrow$ `TypeScript` $\rightarrow$ `React` / `Node.js` $\rightarrow$ `Express.js`, `SQL` $\rightarrow$ `PostgreSQL` / `MySQL`, `HTML` + `CSS` $\rightarrow$ `Tailwind CSS`, `Python` $\rightarrow$ `Django` / `Flask` / `Data Science Fundamentals` $\rightarrow$ `Machine Learning`).
+   - Supports alias canonicalization prior to graph lookup, ensuring variant spellings (e.g. `ReactJS`, `K8s`, `Postgres`) map to valid canonical nodes.
+
+### 8.3 Graph Algorithms & Complexity Analysis
+
+1. **Cycle Detection & DAG Validation:**
+   - **Algorithm:** Three-Color Depth-First Search (DFS) with node state tracking:
+     - `WHITE` (0): Unvisited node.
+     - `GRAY` (1): Node currently on the active recursion stack. If a gray node is revisited, a cycle exists.
+     - `BLACK` (2): Node completely processed and verified acyclic.
+   - **Cycle Path Extraction:** When a back-edge $(u, v)$ is encountered, the algorithm reconstructs and returns the exact cycle sequence (e.g., `A -> B -> C -> A`).
+   - **Verification:** The system pre-validates both the repository's curated graph on startup and any ad-hoc graph configurations, throwing structured validation errors before downstream processing.
+
+2. **Topological Sorting:**
+   - **Algorithm:** Kahn's Algorithm (in-degree BFS) augmented with deterministic priority ordering.
+   - **Time Complexity:** $\mathcal{O}(V \log V + E)$ where $V$ is the number of active skills in the roadmap and $E$ is the number of prerequisite edges. The $\log V$ factor is introduced by the deterministic priority queue sorting at each zero in-degree step.
+   - **Space Complexity:** $\mathcal{O}(V + E)$ to maintain the in-degree map, adjacency list, reverse unlock list, and sorted output buffer.
+   - **Rationale:** Kahn's algorithm naturally detects remaining cycles (if sorted node count $< V$) and cleanly enables deterministic, multi-attribute tie-breaking among all currently "ready" skills (in-degree = 0) without stack overflow risks on deep trees.
+
+3. **Transitive Dependency Expansion:**
+   - Starting from target missing skills identified by the Phase 1 Job Match engine, the service recursively traverses all upstream prerequisite edges (`visitUpstream`).
+   - Employs a recursion-chain guard (`Set<string>`) to prevent stack overflow even on pathological input graphs.
+   - **Candidate Skill Evidence Exclusion:** Skills already demonstrated on the candidate's resume (with verified evidence) are marked as `acquired = true`. They are excluded from the actionable learning sequence, and their prerequisite constraints are satisfied for downstream skills.
+   - **Shared Prerequisite Deduplication:** Shared prerequisites (e.g., `JavaScript` required by both `React` and `Node.js`) are expanded and deduplicated into a single foundational step.
+   - **Unmet Prerequisite Retention:** Prerequisites absent from the raw job description (e.g., `HTTP Fundamentals` for `REST API Development`) are retained as explicit learning milestones.
+
+4. **Deterministic Prioritization & Tie-Breaking Rules:**
+   When multiple skills have all their prerequisites satisfied ($\text{in-degree} = 0$), tie-breaking occurs in strict deterministic order:
+   1. **Job Requirement Level:** Direct `required` skills (weight 1.0) precede `unspecified` skills (0.75), which precede `preferred` skills (0.5), which precede indirect prerequisite skills.
+   2. **Downstream Impact:** Skills that unlock a higher number of downstream roadmap targets are prioritized earlier.
+   3. **Lexicographical Tie-Breaker:** Canonical skill name ascending (`localeCompare`) guarantees identical, reproducible roadmap sequences across repeated requests.
+
+### 8.4 Roadmap Generation & Phasing Pipeline
+
+The expanded and topologically sorted skill list is synthesized into a 4-phase pedagogical curriculum:
+- **Phase 1: Foundations & Prerequisites:** Foundational tools and programming concepts missing from the candidate's profile (e.g., Git, JavaScript, HTTP, Data Structures).
+- **Phase 2: Core Job Requirements:** High-priority, direct `required` skills whose foundations are in place.
+- **Phase 3: Secondary & Advanced Requirements:** Remaining required and preferred skills, frameworks, and database architectures.
+- **Phase 4: Specializations & Enhancements:** Cloud infrastructure, containerization, CI/CD, and specialized tools.
+
+Each roadmap step contains:
+- `skillName`: Canonical skill title.
+- `phase`: Assigned learning phase.
+- `priority`: Direct requirement level (`required`, `preferred`, `unspecified`, or `prerequisite`).
+- `whyItMatters`: Educational explanation citing job requirements or downstream prerequisite dependencies.
+- `prerequisites`: Required prerequisite skills that must be learned before this step.
+- `unlocks`: Skills unlocked upon mastering this step.
+- `learningObjective`: Specific engineering competency to achieve.
+- `practicalExercise`: Hands-on coding exercise or tutorial task.
+- `projectDeliverable`: Real-world project or feature deliverable demonstrating mastery.
+- `completionCriteria`: Measurable criteria for verifying completion.
+- `status`: Interactive state (`not_started`, `in_progress`, `completed`).
+
+### 8.5 AI Content Boundary & Deterministic Fallback
+
+To ensure absolute reliability and prevent AI hallucinations from distorting learning paths:
+- **Strict Boundary:** Graph construction, prerequisite validation, dependency expansion, and topological ordering are **100% deterministic**. The LLM is never permitted to alter or override prerequisite constraints.
+- **Deterministic Educational Templates:** `roadmap.service.ts` includes curated educational templates covering objectives, exercises, deliverables, and completion criteria for all canonical taxonomy skills.
+- **Fallback Reliability:** If Google Gemini is unconfigured, rate-limited, or throws an exception, the system seamlessly applies the deterministic templates. Zero API failures surface to the end user.
+
+### 8.6 Database Persistence & User Scoping
+
+- **Mongoose Model (`Roadmap.ts`):**
+  - Fields: `userId` (indexed `ObjectId`), `jobTitle`, `jobCompany`, `targetSkills`, `prerequisiteSkills`, `steps` (array of `RoadmapStep`), `totalSteps`, `completedSteps`, `completionPercentage`, `status` (`active`, `completed`, `archived`), timestamps.
+  - Strict user-isolation: all queries filter by `req.user.id`.
+- **Progress Controller Integration (`progress.controller.ts`):**
+  - Connects the user's active `Roadmap` completion percentage with the overall career journey stats, displaying total steps, completed milestones, and active roadmap status.
+
+### 8.7 API Endpoints
+
+| Method | Endpoint | Auth | Purpose |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/jobs/roadmap` | JWT Bearer | Generates a personalized learning roadmap from the job match analysis and active resume. |
+| `GET` | `/api/jobs/roadmap` | JWT Bearer | Retrieves the authenticated user's current active learning roadmap. |
+| `PATCH` | `/api/jobs/roadmap/step` | JWT Bearer | Updates a step's completion status (`not_started`, `in_progress`, `completed`) and recalculates roadmap completion percentage. |
+
+### 8.8 Frontend Interface Integration (`ResumePage.tsx`)
+
+The roadmap is deeply integrated into the existing Job Match interface under the "Active Resume & Job Match" hub:
+1. **Interactive Trigger:** After job description matching, a "Generate Learning Roadmap" action initiates roadmap synthesis.
+2. **Dual-View Switcher:**
+   - **Ordered Learning Steps View:** Displays chronological cards organized by phase, with progress counters, prerequisites badges, unlocked skills badges, practical exercise and deliverable callouts, and interactive status buttons.
+   - **Interactive Skill Dependency Graph View:** Visual dependency graph rendering nodes with category and status color-coding, direct job requirement badges, dependency arrows, and a comprehensive legend explaining acquired skills, missing prerequisites, direct requirements, and unlocked technologies.
+
+---
+
+## 9. AI Integration Pipeline
+
+### 9.1 Integration Details
 - **Provider & Library:** Google Gemini using `@google/genai` (v2.15.0).
 - **Authentication:** `process.env.GEMINI_API_KEY`.
 - **Model Fallback Chain:**
@@ -615,7 +751,7 @@ The system provides comprehensive mathematical transparency, requirement-level e
   3. `gemini-2.0-flash-lite` (Tertiary low-latency fallback).
   4. Dynamic deterministic rule-based calculation (Offline / Key missing fallback).
 
-### 8.2 AI Workflows & Prompt Specifications
+### 9.2 AI Workflows & Prompt Specifications
 
 ```mermaid
 flowchart TD
@@ -660,20 +796,20 @@ flowchart TD
 
 ---
 
-## 9. Authentication & Security
+## 10. Authentication & Security
 
-### 9.1 Registration & Password Security
+### 10.1 Registration & Password Security
 - User registration requires `fullName`, `email`, and `password`.
 - Passwords must be $\ge 6$ characters; hashed using `bcrypt.hash(password, 10)`.
 - Emails are normalized via `.toLowerCase().trim()`.
 - Unique constraints are enforced at both the Mongoose schema level and in controller queries.
 
-### 9.2 JWT Handling
+### 10.2 JWT Handling
 - Token signed with `jsonwebtoken` using secret `process.env.JWT_SECRET`.
 - Expiry configured via `process.env.JWT_EXPIRES_IN` (defaults to `"7d"`).
 - Stateless authorization header format: `Authorization: Bearer <token>`.
 
-### 9.3 Middleware & File Security
+### 10.3 Middleware & File Security
 - [auth.middleware.ts](file:///d:/coding/careerAI/backend/src/middleware/auth.middleware.ts): Decodes JWT payload and populates `req.userId`.
 - [validate.ts](file:///d:/coding/careerAI/backend/src/middleware/validate.ts): Zod validation middleware parsing `req.body`. Rejects unformatted requests with `400 Bad Request` and structured field errors.
 - [upload.ts](file:///d:/coding/careerAI/backend/src/middleware/upload.ts):
@@ -683,7 +819,7 @@ flowchart TD
 
 ---
 
-## 10. Database Models & Persistence
+## 11. Database Models & Persistence
 
 The active persistence layer uses **MongoDB with Mongoose**.
 
@@ -692,7 +828,8 @@ erDiagram
     User ||--o{ Resume : "owns"
     User ||--o{ Analysis : "owns"
     User ||--o{ InterviewSession : "conducts"
-    User ||--o{ Progress : "tracks"
+    User ||--o{ Roadmap : "tracks"
+    User ||--o{ Progress : "aggregates"
     User ||--|| UserSettings : "configures"
 
     User {
@@ -783,6 +920,22 @@ erDiagram
         date updatedAt
     }
 
+    Roadmap {
+        ObjectId _id PK
+        ObjectId userId FK
+        string jobTitle
+        string jobCompany
+        string[] targetSkills
+        string[] prerequisiteSkills
+        object[] steps
+        number totalSteps
+        number completedSteps
+        number completionPercentage
+        string status "active | completed | archived"
+        date createdAt
+        date updatedAt
+    }
+
     UserSettings {
         ObjectId _id PK
         ObjectId user FK UK
@@ -798,9 +951,9 @@ erDiagram
 
 ---
 
-## 11. Frontend Processing & UI Data Flow
+## 12. Frontend Processing & UI Data Flow
 
-### 11.1 Routing Architecture
+### 12.1 Routing Architecture
 Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) using React Router DOM:
 - **Public Layout (`MainLayout`):**
   - `/`: [LandingPage](file:///d:/coding/careerAI/frontend/src/pages/Landing/LandingPage.tsx)
@@ -815,7 +968,7 @@ Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) 
   - `/progress`: [ProgressPage](file:///d:/coding/careerAI/frontend/src/pages/Progress/ProgressPage.tsx)
   - `/settings`: [SettingsPage](file:///d:/coding/careerAI/frontend/src/pages/Settings/SettingsPage.tsx)
 
-### 11.2 State Management & Network Layer
+### 12.2 State Management & Network Layer
 - **Axios Instance:** Centralized in [api.ts](file:///d:/coding/careerAI/frontend/src/services/api.ts). Injects `careerai_token` from `localStorage` on every outbound request.
 - **Auth Context:** [AuthContext.tsx](file:///d:/coding/careerAI/frontend/src/context/AuthContext.tsx) maintains active user state, login handler, registration handler, and logout cleanup.
 - **Component States:**
@@ -825,19 +978,19 @@ Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) 
 
 ---
 
-## 12. Other Feature Pipelines
+## 13. Other Feature Pipelines
 
-### 12.1 Interactive Mock Interview Simulator
+### 13.1 Interactive Mock Interview Simulator
 - **Endpoints:** `POST /api/interview/start`, `POST /api/interview/submit-answer`, `POST /api/interview/finish`, `GET /api/interview/stats`.
 - **Modes:** Mixed, Resume Based, Technical, System Design, HR, Behavioural, Aptitude.
 - **Resume Integration:** In Resume-Based and Mixed modes, candidate's parsed projects and skills are directly injected into Gemini prompt context to ask questions about candidate's actual projects.
 - **Real-Time Evaluation:** Evaluates each answer on accuracy, communication, technical correctness, depth, confidence (0–100), and provides an STAR-structured ideal answer and follow-up question.
 
-### 12.2 Progress Tracking & Weekly Coach
+### 13.2 Progress Tracking & Weekly Coach
 - **Endpoint:** `GET /api/progress/stats`.
-- **Metrics Aggregated:** Current resume score, ATS score, average mock interview score, roadmap completion %, questions solved count, unlocked achievements (6 tiered achievements), chronological timeline, weak topics, and personalized weekly coach guidance.
+- **Metrics Aggregated:** Current resume score, ATS score, average mock interview score, active learning roadmap completion %, questions solved count, unlocked achievements (6 tiered achievements), chronological timeline, weak topics, and personalized weekly coach guidance.
 
-### 12.3 User Settings & Career Goals
+### 13.3 User Settings & Career Goals
 - **Endpoints:** `GET /api/settings`, `PUT /api/settings`.
 - **Configurable Sections:**
   - `profile`: Name, college, degree, graduation year, LinkedIn, GitHub, portfolio, bio.
@@ -848,7 +1001,7 @@ Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) 
 
 ---
 
-## 13. API Endpoint Inventory
+## 14. API Endpoint Inventory
 
 | HTTP Method | Route Path | Auth Req. | Controller Action | Request Body / Params | Expected Response Shape |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -860,6 +1013,9 @@ Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) 
 | `GET` | `/api/resume/latest` | Yes | `resume.controller.getLatestResume` | None | `{ success: true, data: { ...resume, projectAnalysis } }` |
 | `DELETE` | `/api/resume/:id` | Yes | `resume.controller.deleteResume` | URL Param `:id` | `{ success: true, message: "Resume deleted successfully" }` |
 | `POST` | `/api/jobs/match` | Yes | `jobMatch.controller.matchJobDescription` | `{ jobDescription, resumeId? }` | `{ success: true, match, projectRelevance, data }` |
+| `POST` | `/api/jobs/roadmap` | Yes | `roadmap.controller.generateLearningRoadmap` | `{ jobDescription, resumeId? }` | `{ success: true, roadmap: RoadmapDocument }` |
+| `GET` | `/api/jobs/roadmap` | Yes | `roadmap.controller.getActiveRoadmap` | None | `{ success: true, roadmap: RoadmapDocument }` |
+| `PATCH` | `/api/jobs/roadmap/step` | Yes | `roadmap.controller.updateRoadmapStepStatus` | `{ roadmapId, skillName, status }` | `{ success: true, roadmap: RoadmapDocument }` |
 | `GET` | `/api/analysis/latest` | Yes | `analysis.controller.getLatestAnalysis` | None | `{ success: true, data: AnalysisDocument }` |
 | `POST` | `/api/analysis/resume` | Yes | `analysis.controller.runResumeAnalysis` | None | `{ success: true, data: AnalysisDocument }` |
 | `POST` | `/api/analysis/improve-section` | Yes | `analysis.controller.improveSection` | `{ sectionType, content }` | `{ success: true, data: { improvedContent, keyChanges } }` |
@@ -869,33 +1025,35 @@ Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) 
 | `POST` | `/api/interview/start` | Yes | `interview.controller.startInterviewSession` | `{ mode, difficulty, length, targetCompany, targetRole }` | `{ success: true, data: InterviewSession }` |
 | `POST` | `/api/interview/submit-answer` | Yes | `interview.controller.submitQuestionAnswer` | `{ sessionId, questionId, questionText, userAnswer }` | `{ success: true, data: { sessionId, evaluation } }` |
 | `POST` | `/api/interview/finish` | Yes | `interview.controller.finishInterviewSession` | `{ sessionId }` | `{ success: true, data: InterviewSession }` |
-| `GET` | `/api/progress/stats` | Yes | `progress.controller.getProgressStats` | None | `{ success: true, data: { currentResumeScore, achievements, ... } }` |
+| `GET` | `/api/progress/stats` | Yes | `progress.controller.getProgressStats` | None | `{ success: true, data: { currentResumeScore, achievements, activeRoadmap, ... } }` |
 | `GET` | `/api/settings` | Yes | `settings.controller.getUserSettings` | None | `{ success: true, data: UserSettings }` |
 | `PUT` | `/api/settings` | Yes | `settings.controller.updateUserSettings` | `{ profile, career, learning, aiPreferences, notifications }` | `{ success: true, data: UserSettings }` |
 
 ---
 
-## 14. Error Handling & Edge Cases
+## 15. Error Handling & Edge Cases
 
-### 14.1 Global Error Handling
+### 15.1 Global Error Handling
 Configured in [app.ts](file:///d:/coding/careerAI/backend/src/app.ts):
 - Multer `LIMIT_FILE_SIZE`: Returns `413 Payload Too Large` with `"Resume file is too large. Maximum allowed size is 5 MB."`.
 - Invalid file type: Returns `415 Unsupported Media Type` with `"Invalid file type. Only PDF and DOCX files are allowed."`.
 - Custom `ResumeParserError`: Returns `error.statusCode` (400, 415, or 422) with descriptive validation message.
 - Unhandled internal exceptions: Returns `500 Internal Server Error` with generic `"Server error processing request"` to prevent stack trace leaks.
 
-### 14.2 Domain-Specific Edge Cases
+### 15.2 Domain-Specific Edge Cases
 - **Empty Resumes / Scanned Images:** Caught by `cleanResumeText()`. If length is zero, throws `ResumeParserError("No readable text could be extracted from this resume. Please upload a text-based PDF or DOCX file.", 422)`.
 - **Cloudinary Failures:** Temporary local files in `uploads/resumes/` are guaranteed to be unlinked in `try/finally` blocks even if cloud upload throws an error.
 - **Empty Job Description:** Returns `400 Bad Request` if string is empty or missing.
 - **JD with No Recognized Skills:** Returns `overallScore: null` and informative explanation without crashing scoring routines.
-- **Missing Gemini API Key:** The system does not crash; it transparently switches to the deterministic rule-based calculation engine.
+- **Graph Cycle Detection:** If circular dependencies are introduced in custom dependency definitions, the three-color DFS cycle detector intercepts them and throws a structured error detailing the exact cycle path (`A -> B -> A`).
+- **Unknown Skills with No Graph Definitions:** Gracefully handled as isolated target leaf nodes in the roadmap without prerequisites.
+- **Missing Gemini API Key:** The system does not crash; it transparently switches to curated educational templates and deterministic rule-based calculation engines.
 
 ---
 
-## 15. Testing and Verification
+## 16. Testing and Verification
 
-### 15.1 Test Suites Execution
+### 16.1 Test Suites Execution
 All test suites in the repository run via Node.js's native test runner (`node:test` and `node:assert/strict`) registered through `ts-node`.
 
 **Verification Command Executed:**
@@ -908,15 +1066,17 @@ node -r ts-node/register --test `
   src/services/resumeParser.service.test.ts `
   src/services/resumeScoring.service.test.ts `
   src/services/resumeStructuredExtractor.service.test.ts `
-  src/services/skillExtractor.service.test.ts
+  src/services/skillExtractor.service.test.ts `
+  src/services/skillGraph.service.test.ts
 ```
 
-### 15.2 Actual Verification Results
-- **Total Tests Executed:** 127 tests
-- **Passing Tests:** 127
+### 16.2 Actual Verification Results
+- **Total Tests Executed:** 145 tests
+- **Passing Tests:** 145
 - **Failing Tests:** 0
-- **Execution Duration:** ~2.4 seconds
+- **Execution Duration:** ~2.5 seconds
 - **Breakdown by Test File:**
+  - `skillGraph.service.test.ts`: 18 tests passed (valid DAG construction with 0 cycles across curated graph, 2-node cycle detection, multi-node cycle detection, topological ordering with prerequisites before dependents, multi-prerequisite resolution, shared prerequisite deduplication, retention of unmet prerequisites absent from JD, exclusion of candidate-demonstrated skills, alias normalization, required vs preferred prioritization, deterministic tie-breaking, empty target lists, unknown skill definitions, cyclic definition rejection, deterministic educational fallback, roadmap 4-phase assignment, completion percentage calculation, and downstream unlock mapping).
   - `jobMatch.service.test.ts`: 51 tests passed (covering formulas, weights, priority inheritance, ambiguous skills, realistic JDs, and 12 dedicated explainability scenarios: score breakdowns, prioritized missing skills, classification reasons, resume evidence extraction, duplicate collapse, and zero inflation).
   - `profileCompleteness.service.test.ts`: 17 tests passed (covering empty states, required vs optional fields, and profile flags).
   - `projectAnalysis.service.test.ts`: 11 tests passed (covering verb counts, technical depth diminishing returns, URL evidence, and domains).
@@ -926,18 +1086,18 @@ node -r ts-node/register --test `
   - `resumeStructuredExtractor.service.test.ts`: 33 tests passed (verifying zero fabrication of experience/degrees, URL link metadata attachment, and section pass-through).
   - `skillExtractor.service.test.ts`: 4 tests passed (verifying alias deduplication, ranking formulas, section evidence, and C/Go prose filtering).
 
-### 15.3 Frontend Build Verification
+### 16.3 Frontend Build Verification
 **Verification Command Executed:**
 ```powershell
 npm run build # inside frontend/
 ```
-- **Result:** TypeScript compilation (`tsc -b`) and Vite production bundle succeeded in 4.54s without errors (`dist/index.html` generated).
+- **Result:** TypeScript compilation (`tsc -b`) and Vite production bundle succeeded cleanly (`dist/index.html` and bundled assets generated with zero type errors).
 
 ---
 
-## 16. End-to-End Pipeline Summary
+## 17. End-to-End Pipeline Summary
 
-### 16.1 Upload to Analysis Pipeline
+### 17.1 Upload to Analysis Pipeline
 ```mermaid
 flowchart LR
     A[Upload PDF/DOCX] --> B[Clean Text & Detect 10 Sections]
@@ -949,7 +1109,7 @@ flowchart LR
     G --> H[Render ATS Dashboard & Project Cards in React]
 ```
 
-### 16.2 Job Match Pipeline
+### 17.2 Job Match Pipeline
 ```mermaid
 flowchart LR
     A[Paste Job Description] --> B[Parse Requirements & Priorities]
@@ -959,41 +1119,57 @@ flowchart LR
     E --> F[Render Match Breakdown & Missing Skills in UI]
 ```
 
+### 17.3 Skill Graph & Learning Roadmap Pipeline
+```mermaid
+flowchart LR
+    A[Job Match Output: Missing Skills] --> B[Filter Acquired Resume Skills]
+    B --> C[DAG Cycle Check: 3-Color DFS]
+    C --> D[Kahn's Topological Sort + Tie-Breaking]
+    D --> E[Synthesize Practical Exercises & Deliverables]
+    E --> F[Persist Roadmap in MongoDB]
+    F --> G[Render Dual-View UI: Ordered Steps + SVG Graph]
+```
+
 ---
 
-## 17. Implementation Status and Gaps
+## 18. Implementation Status and Gaps
 
-### 17.1 Verified Implemented Modules
+### 18.1 Verified Implemented Modules
 - Complete PDF/DOCX multi-section resume parser.
 - Comprehensive technical skill taxonomy with alias resolution.
 - Deterministic 100-point resume quality scorer with portfolio diminishing returns.
-- Priority-weighted job description matcher with evidence mapping.
+- Priority-weighted job description matcher with evidence mapping and mathematical explainability (Phase 1).
+- Directed skill dependency graph with 3-color DFS cycle validation and Kahn's topological sort (Phase 2).
+- Intelligent, personalized learning roadmap generation with practical exercises, deliverables, and interactive step completion tracking (Phase 2).
 - Per-project strength and relevance analyzers.
-- Multi-model Gemini integration with rule-based fallback.
+- Multi-model Gemini integration with rule-based and curated template fallbacks.
 - Mock interview question generator and answer evaluator.
 - Authenticated JWT user management and MongoDB data lifecycle.
-- Clean Vite/React frontend dashboard with interactive charts and tabs.
+- Clean Vite/React frontend dashboard with interactive charts, dual-view roadmap, and tabs.
 
-### 17.2 Discovered Gaps & Differences from Documentation
+### 18.2 Discovered Gaps & Differences from Documentation
 1. **Database Mismatch in README:** The root `README.md` lists PostgreSQL and Prisma ORM. The real implementation is built on MongoDB with Mongoose.
-2. **Dashboard Mock Counts:** `interviewCount` and `questionsPracticed` in `dashboard.controller.ts` return hardcoded `0` rather than aggregating from `InterviewSession`. (Note: [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts) does properly aggregate live completed sessions).
+2. **Dashboard Mock Counts:** `interviewCount` and `questionsPracticed` in `dashboard.controller.ts` return hardcoded `0` rather than aggregating from `InterviewSession`. (Note: [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts) does properly aggregate live completed sessions and active roadmap completion).
 3. **Email Notifications:** `nodemailer` is listed in `backend/package.json`, but no mailer service or email verification workflows are active.
 4. **Cloudinary Fallback URL:** When Cloudinary environment keys are not provided, files are referenced via `http://localhost:5000/uploads/resumes/`. Ensure static serving is enabled in production.
 
 ---
 
-## 18. Source File Reference Index
+## 19. Source File Reference Index
 
-### 18.1 Backend Core Files
+### 19.1 Backend Core Files
 - [app.ts](file:///d:/coding/careerAI/backend/src/app.ts): Express server setup, middleware stack, CORS, upload error handlers.
 - [server.ts](file:///d:/coding/careerAI/backend/src/server.ts): MongoDB connection initialization and HTTP listener.
 - [database.ts](file:///d:/coding/careerAI/backend/src/config/database.ts): Mongoose connection logic.
 - [cloudinary.ts](file:///d:/coding/careerAI/backend/src/config/cloudinary.ts): Cloudinary raw uploader with local disk fallback.
 
-### 18.2 Backend Services (Algorithms)
+### 19.2 Backend Services & Data (Algorithms)
 - [skillTaxonomy.ts](file:///d:/coding/careerAI/backend/src/data/skills/skillTaxonomy.ts): Master taxonomy definitions, alias mappings, and weights.
+- [skillDependencyGraph.ts](file:///d:/coding/careerAI/backend/src/data/skills/skillDependencyGraph.ts): Master prerequisite dependency relationships and canonical graph definitions.
 - [resumeDocumentParser.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeDocumentParser.service.ts): PDF/DOCX file extractors, Unicode cleaner, and 10-section detector.
 - [skillExtractor.service.ts](file:///d:/coding/careerAI/backend/src/services/skillExtractor.service.ts): Taxonomy regex matcher, contextual disambiguator, and ranking engine.
+- [skillGraph.service.ts](file:///d:/coding/careerAI/backend/src/services/skillGraph.service.ts): Directed acyclic graph validator (3-color DFS), transitive dependency expander, and Kahn's topological sorter.
+- [roadmap.service.ts](file:///d:/coding/careerAI/backend/src/services/roadmap.service.ts): Personalized learning roadmap synthesizer with phased curriculum and deterministic educational templates.
 - [resumeStructuredExtractor.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeStructuredExtractor.service.ts): Cohesive education, experience, and project entity extractor.
 - [resumeScoring.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeScoring.service.ts): 6-component deterministic resume scoring engine.
 - [resumeParser.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeParser.service.ts): Legacy unified ATS score calculator and section checklist generator.
@@ -1004,19 +1180,21 @@ flowchart LR
 - [profileCompleteness.service.ts](file:///d:/coding/careerAI/backend/src/services/profileCompleteness.service.ts): Audit checks for required profile fields.
 - [ai.service.ts](file:///d:/coding/careerAI/backend/src/services/ai.service.ts): Google Gemini AI SDK integration with fallback logic.
 
-### 18.3 Backend Controllers & Models
+### 19.3 Backend Controllers & Models
 - [auth.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/auth.controller.ts) / [User.ts](file:///d:/coding/careerAI/backend/src/models/User.ts): User authentication and model.
 - [resume.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/resume.controller.ts) / [Resume.ts](file:///d:/coding/careerAI/backend/src/models/Resume.ts): Resume upload, parsing, and retrieval.
 - [jobMatch.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/jobMatch.controller.ts): Job match endpoint.
+- [roadmap.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/roadmap.controller.ts) / [Roadmap.ts](file:///d:/coding/careerAI/backend/src/models/Roadmap.ts): Learning roadmap generation, retrieval, step updates, and model.
 - [analysis.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/analysis.controller.ts) / [Analysis.ts](file:///d:/coding/careerAI/backend/src/models/Analysis.ts): AI resume analysis and section rewriting.
 - [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts) / [InterviewSession.ts](file:///d:/coding/careerAI/backend/src/models/InterviewSession.ts): Mock interview sessions.
-- [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts) / [Progress.ts](file:///d:/coding/careerAI/backend/src/models/Progress.ts): Learning journey and timeline.
+- [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts) / [Progress.ts](file:///d:/coding/careerAI/backend/src/models/Progress.ts): Learning journey, roadmap completion aggregation, and timeline.
 - [settings.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/settings.controller.ts) / [UserSettings.ts](file:///d:/coding/careerAI/backend/src/models/UserSettings.ts): User settings and preferences.
 
-### 18.4 Frontend Application Files
+### 19.4 Frontend Application Files
 - [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx): Application route definitions.
 - [api.ts](file:///d:/coding/careerAI/frontend/src/services/api.ts): Axios interceptor configuration with JWT injection.
-- [ResumePage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Resume/ResumePage.tsx): Active resume viewer, ATS insight tabs, and Job Match UI.
+- [jobs.service.ts](file:///d:/coding/careerAI/frontend/src/features/jobs/jobs.service.ts): Job matching, roadmap generation, and step status update API client.
+- [ResumePage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Resume/ResumePage.tsx): Active resume viewer, ATS insight tabs, Explainable Job Match UI, Dual-View Learning Roadmap, and Interactive SVG Skill Dependency Graph.
 - [AnalysisPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Analysis/AnalysisPage.tsx): Quality score cards, section rewrites, and skill gap roadmaps.
 - [InterviewPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Interview/InterviewPage.tsx): Interactive mock interview flow.
 - [DashboardPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Dashboard/DashboardPage.tsx): High-level career readiness metric cards.
