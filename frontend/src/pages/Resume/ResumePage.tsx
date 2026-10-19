@@ -20,6 +20,12 @@ import {
   X,
   ArrowRight,
   Target,
+  Calculator,
+  TrendingUp,
+  Info,
+  ListFilter,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 import ResumeUploadCard, { formatFileSize } from "../../components/resume/ResumeUploadCard";
@@ -42,6 +48,8 @@ function ResumePage() {
   const [jobMatchResult, setJobMatchResult] = useState<JobMatchResult | null>(null);
   const [jobMatchError, setJobMatchError] = useState<string | null>(null);
   const [projectRelevance, setProjectRelevance] = useState<ProjectJobRelevance[] | null>(null);
+  const [requirementFilter, setRequirementFilter] = useState<"all" | "matched" | "missing">("all");
+  const [showCalculationDetails, setShowCalculationDetails] = useState(true);
 
   const fetchResume = async () => {
     try {
@@ -827,16 +835,20 @@ Example:
                 {/* Match Results Display */}
                 {jobMatchResult && (
                   <div className="space-y-6">
-                    {/* Score Overview */}
-                    <div className="grid gap-6 md:grid-cols-3">
-                      <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/80 to-white p-6 shadow-sm">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Job Match Score</span>
-                        <div className="mt-4 flex items-baseline gap-2">
+                    {/* Explainable Score Overview (4-Card Metric Grid) */}
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                      {/* Overall Score */}
+                      <div className="rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/90 to-white p-5 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Job Match Score</span>
+                          <Target size={18} className="text-blue-500" />
+                        </div>
+                        <div className="mt-3 flex items-baseline gap-2">
                           {jobMatchResult.overallScore !== null ? (
                             <>
-                              <span className="text-4xl font-extrabold text-blue-600">{jobMatchResult.overallScore}%</span>
+                              <span className="text-3xl font-extrabold text-blue-600">{jobMatchResult.overallScore}%</span>
                               <span
-                                className={`text-xs font-semibold px-2.5 py-0.5 rounded-full ${
+                                className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
                                   jobMatchResult.overallScore >= 75
                                     ? "text-emerald-700 bg-emerald-100"
                                     : jobMatchResult.overallScore >= 50
@@ -852,143 +864,445 @@ Example:
                               </span>
                             </>
                           ) : (
-                            <span className="text-xl font-bold text-gray-400">No Score</span>
+                            <span className="text-lg font-bold text-gray-400">No Recognized Skills</span>
                           )}
                         </div>
-                        <p className="mt-2 text-xs text-gray-500">
+                        <p className="mt-2 text-[11px] text-gray-500 line-clamp-2">
                           {jobMatchResult.scoreExplanation || "Weighted by Required (1.0), Preferred (0.5), Unspecified (0.75)"}
                         </p>
                       </div>
 
-                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Required Skills</span>
-                        <div className="mt-4 flex items-baseline gap-3">
-                          <span className="text-3xl font-bold text-emerald-600">{jobMatchResult.matchedRequired.length}</span>
-                          <span className="text-sm font-semibold text-gray-400">matched</span>
-                          <span className="text-3xl font-bold text-red-500 ml-2">{jobMatchResult.missingRequired.length}</span>
-                          <span className="text-sm font-semibold text-gray-400">missing</span>
+                      {/* Required Requirements */}
+                      <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Required Skills</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                            Weight 1.0
+                          </span>
                         </div>
-                        <p className="mt-2 text-xs text-gray-500">Weight: 1.0 each</p>
+                        <div className="mt-3 flex items-baseline gap-2">
+                          <span className="text-2xl font-bold text-emerald-600">{jobMatchResult.matchedRequired.length}</span>
+                          <span className="text-xs text-gray-400">/ {jobMatchResult.matchedRequired.length + jobMatchResult.missingRequired.length} matched</span>
+                        </div>
+                        <p className="mt-2 text-[11px] text-gray-500">
+                          {jobMatchResult.scoreBreakdown?.categories?.required
+                            ? `${jobMatchResult.scoreBreakdown.categories.required.earnedWeight} of ${jobMatchResult.scoreBreakdown.categories.required.totalPossibleWeight} weighted pts`
+                            : `${jobMatchResult.missingRequired.length} skill(s) missing`}
+                        </p>
                       </div>
 
-                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-                        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Preferred Skills</span>
-                        <div className="mt-4 flex items-baseline gap-3">
-                          <span className="text-3xl font-bold text-blue-600">{jobMatchResult.matchedPreferred.length}</span>
-                          <span className="text-sm font-semibold text-gray-400">matched</span>
-                          <span className="text-3xl font-bold text-gray-500 ml-2">{jobMatchResult.missingPreferred.length}</span>
-                          <span className="text-sm font-semibold text-gray-400">missing</span>
+                      {/* Preferred Requirements */}
+                      <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Preferred Skills</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                            Weight 0.5
+                          </span>
                         </div>
-                        <p className="mt-2 text-xs text-gray-500">Weight: 0.5 each</p>
+                        <div className="mt-3 flex items-baseline gap-2">
+                          <span className="text-2xl font-bold text-blue-600">{jobMatchResult.matchedPreferred.length}</span>
+                          <span className="text-xs text-gray-400">/ {jobMatchResult.matchedPreferred.length + jobMatchResult.missingPreferred.length} matched</span>
+                        </div>
+                        <p className="mt-2 text-[11px] text-gray-500">
+                          {jobMatchResult.scoreBreakdown?.categories?.preferred
+                            ? `${jobMatchResult.scoreBreakdown.categories.preferred.earnedWeight} of ${jobMatchResult.scoreBreakdown.categories.preferred.totalPossibleWeight} weighted pts`
+                            : `${jobMatchResult.missingPreferred.length} skill(s) missing`}
+                        </p>
                       </div>
-                    </div>
 
-                    {/* Matched & Missing Required Skills */}
-                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-6">
-                      <h4 className="text-base font-bold text-gray-900">Required Skills Breakdown</h4>
-                      <div className="grid gap-6 md:grid-cols-2">
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
-                            <Check size={16} />
-                            <span>Matched Required Skills ({jobMatchResult.matchedRequired.length})</span>
-                          </div>
-                          {jobMatchResult.matchedRequired.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {jobMatchResult.matchedRequired.map((skill) => (
-                                <span
-                                  key={skill.name}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800 border border-emerald-200"
-                                  title={skill.resumeEvidence ? `Found ${skill.resumeEvidence.occurrences}x in: ${skill.resumeEvidence.sections.join(", ")}` : undefined}
-                                >
-                                  <Check size={12} className="text-emerald-600" />
-                                  {skill.name}
-                                  {skill.resumeEvidence && (
-                                    <span className="ml-1 rounded bg-emerald-200/60 px-1 py-0.2 text-[10px] text-emerald-900">
-                                      {skill.resumeEvidence.occurrences}x
-                                    </span>
-                                  )}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-gray-400 italic">None matched yet.</p>
-                          )}
+                      {/* Unspecified / Total Recognized */}
+                      <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Unspecified Skills</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 bg-purple-50 px-2 py-0.5 rounded">
+                            Weight 0.75
+                          </span>
                         </div>
-
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2 text-xs font-semibold text-red-600">
-                            <X size={16} />
-                            <span>Missing Required Skills ({jobMatchResult.missingRequired.length})</span>
-                          </div>
-                          {jobMatchResult.missingRequired.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {jobMatchResult.missingRequired.map((skill) => (
-                                <span
-                                  key={skill.name}
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-3 py-1 text-xs font-semibold text-red-700 border border-red-200"
-                                >
-                                  <X size={12} className="text-red-500" />
-                                  {skill.name}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-emerald-600 font-medium">All required skills met!</p>
-                          )}
+                        <div className="mt-3 flex items-baseline gap-2">
+                          <span className="text-2xl font-bold text-purple-600">{jobMatchResult.matchedUnspecified.length}</span>
+                          <span className="text-xs text-gray-400">/ {jobMatchResult.matchedUnspecified.length + jobMatchResult.missingUnspecified.length} matched</span>
                         </div>
+                        <p className="mt-2 text-[11px] text-gray-500">
+                          {jobMatchResult.scoreBreakdown?.categories?.unspecified
+                            ? `${jobMatchResult.scoreBreakdown.categories.unspecified.earnedWeight} of ${jobMatchResult.scoreBreakdown.categories.unspecified.totalPossibleWeight} weighted pts`
+                            : `${jobMatchResult.missingUnspecified.length} skill(s) missing`}
+                        </p>
                       </div>
                     </div>
 
-                    {/* Preferred Skills Breakdown */}
-                    {(jobMatchResult.matchedPreferred.length > 0 || jobMatchResult.missingPreferred.length > 0) && (
-                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-6">
-                        <h4 className="text-base font-bold text-gray-900">Preferred Qualifications Breakdown</h4>
-                        <div className="grid gap-6 md:grid-cols-2">
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-2 text-xs font-semibold text-blue-700">
-                              <Check size={16} />
-                              <span>Matched Preferred ({jobMatchResult.matchedPreferred.length})</span>
+                    {/* Transparent Mathematical Score Breakdown */}
+                    {jobMatchResult.scoreBreakdown && (
+                      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between cursor-pointer" onClick={() => setShowCalculationDetails(!showCalculationDetails)}>
+                          <div className="flex items-center gap-2">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                              <Calculator size={18} />
                             </div>
-                            {jobMatchResult.matchedPreferred.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {jobMatchResult.matchedPreferred.map((skill) => (
-                                  <span
-                                    key={skill.name}
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800 border border-blue-200"
-                                    title={skill.resumeEvidence ? `Found ${skill.resumeEvidence.occurrences}x in: ${skill.resumeEvidence.sections.join(", ")}` : undefined}
-                                  >
-                                    <Check size={12} className="text-blue-600" />
-                                    {skill.name}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-gray-400 italic">None matched.</p>
-                            )}
-                          </div>
-
-                          <div className="space-y-3">
-                            <div className="flex items-center gap-2 text-xs font-semibold text-gray-600">
-                              <span>Missing Preferred ({jobMatchResult.missingPreferred.length})</span>
+                            <div>
+                              <h4 className="text-sm font-bold text-gray-900">Transparent Score Breakdown & Math</h4>
+                              <p className="text-xs text-gray-500">
+                                Exact formula, category weights, and weighted point contributions.
+                              </p>
                             </div>
-                            {jobMatchResult.missingPreferred.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {jobMatchResult.missingPreferred.map((skill) => (
-                                  <span
-                                    key={skill.name}
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 border border-gray-200"
-                                  >
-                                    {skill.name}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-blue-600 font-medium">All preferred skills met!</p>
-                            )}
                           </div>
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 text-xs font-semibold text-blue-600 hover:text-blue-700"
+                          >
+                            {showCalculationDetails ? (
+                              <>
+                                <span>Hide Calculation</span>
+                                <ChevronUp size={16} />
+                              </>
+                            ) : (
+                              <>
+                                <span>Show Calculation</span>
+                                <ChevronDown size={16} />
+                              </>
+                            )}
+                          </button>
                         </div>
+
+                        {showCalculationDetails && (
+                          <div className="space-y-4 pt-2 border-t border-gray-100">
+                            {/* Formula Banner */}
+                            <div className="rounded-xl bg-slate-50 border border-slate-200/80 p-4 font-mono text-xs text-slate-800 space-y-1.5">
+                              <div className="font-semibold text-slate-900 flex items-center gap-1.5">
+                                <Info size={14} className="text-blue-600 font-sans" />
+                                <span>Scoring Formula:</span>
+                              </div>
+                              <div className="text-slate-600 pl-5">
+                                {jobMatchResult.scoreBreakdown.calculationFormula}
+                              </div>
+                              <div className="text-blue-700 font-semibold pl-5 pt-1">
+                                {jobMatchResult.scoreBreakdown.totalPossibleWeightedScore > 0 ? (
+                                  <>
+                                    ({jobMatchResult.scoreBreakdown.earnedWeightedScore} earned pts / {jobMatchResult.scoreBreakdown.totalPossibleWeightedScore} possible pts) × 100 ={" "}
+                                    <span className="text-sm font-bold text-blue-800">{jobMatchResult.scoreBreakdown.finalMatchPercentage}%</span>
+                                  </>
+                                ) : (
+                                  <span>0 recognized requirements found. Score is null.</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Metrics Summary Strip */}
+                            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                              <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 text-center">
+                                <span className="text-[11px] font-medium text-gray-500">Total Recognized</span>
+                                <p className="mt-1 text-lg font-bold text-gray-800">{jobMatchResult.scoreBreakdown.totalRecognizedRequirements}</p>
+                              </div>
+                              <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 text-center">
+                                <span className="text-[11px] font-medium text-gray-500">Matched Skills</span>
+                                <p className="mt-1 text-lg font-bold text-emerald-600">{jobMatchResult.scoreBreakdown.totalMatchedRequirements}</p>
+                              </div>
+                              <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 text-center">
+                                <span className="text-[11px] font-medium text-gray-500">Missing Skills</span>
+                                <p className="mt-1 text-lg font-bold text-red-500">{jobMatchResult.scoreBreakdown.totalMissingRequirements}</p>
+                              </div>
+                              <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-3 text-center">
+                                <span className="text-[11px] font-medium text-gray-500">Total Weighted Pts</span>
+                                <p className="mt-1 text-lg font-bold text-blue-600">{jobMatchResult.scoreBreakdown.earnedWeightedScore} / {jobMatchResult.scoreBreakdown.totalPossibleWeightedScore}</p>
+                              </div>
+                            </div>
+
+                            {/* Detailed Category Table */}
+                            {jobMatchResult.scoreBreakdown.categories && (
+                              <div className="overflow-x-auto rounded-xl border border-gray-100">
+                                <table className="w-full text-left text-xs">
+                                  <thead className="bg-gray-50 text-[11px] uppercase tracking-wider text-gray-500 border-b border-gray-100">
+                                    <tr>
+                                      <th className="px-4 py-2.5 font-semibold">Priority Category</th>
+                                      <th className="px-4 py-2.5 font-semibold">Weight</th>
+                                      <th className="px-4 py-2.5 font-semibold">Matched / Total</th>
+                                      <th className="px-4 py-2.5 font-semibold">Earned / Possible Pts</th>
+                                      <th className="px-4 py-2.5 font-semibold">% of Possible Score</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-gray-100 text-gray-700">
+                                    <tr>
+                                      <td className="px-4 py-2.5 font-semibold text-emerald-800 flex items-center gap-1.5">
+                                        <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+                                        Required
+                                      </td>
+                                      <td className="px-4 py-2.5 font-mono">{jobMatchResult.scoreBreakdown.categories.required.weightPerItem}</td>
+                                      <td className="px-4 py-2.5">
+                                        {jobMatchResult.scoreBreakdown.categories.required.matched} of {jobMatchResult.scoreBreakdown.categories.required.total}
+                                      </td>
+                                      <td className="px-4 py-2.5 font-mono">
+                                        {jobMatchResult.scoreBreakdown.categories.required.earnedWeight} / {jobMatchResult.scoreBreakdown.categories.required.totalPossibleWeight} pts
+                                      </td>
+                                      <td className="px-4 py-2.5 font-semibold text-gray-900">
+                                        {jobMatchResult.scoreBreakdown.totalPossibleWeightedScore > 0
+                                          ? `${Math.round((jobMatchResult.scoreBreakdown.categories.required.totalPossibleWeight / jobMatchResult.scoreBreakdown.totalPossibleWeightedScore) * 100)}%`
+                                          : "0%"}
+                                      </td>
+                                    </tr>
+                                    <tr>
+                                      <td className="px-4 py-2.5 font-semibold text-purple-800 flex items-center gap-1.5">
+                                        <span className="h-2 w-2 rounded-full bg-purple-500"></span>
+                                        Unspecified
+                                      </td>
+                                      <td className="px-4 py-2.5 font-mono">{jobMatchResult.scoreBreakdown.categories.unspecified.weightPerItem}</td>
+                                      <td className="px-4 py-2.5">
+                                        {jobMatchResult.scoreBreakdown.categories.unspecified.matched} of {jobMatchResult.scoreBreakdown.categories.unspecified.total}
+                                      </td>
+                                      <td className="px-4 py-2.5 font-mono">
+                                        {jobMatchResult.scoreBreakdown.categories.unspecified.earnedWeight} / {jobMatchResult.scoreBreakdown.categories.unspecified.totalPossibleWeight} pts
+                                      </td>
+                                      <td className="px-4 py-2.5 font-semibold text-gray-900">
+                                        {jobMatchResult.scoreBreakdown.totalPossibleWeightedScore > 0
+                                          ? `${Math.round((jobMatchResult.scoreBreakdown.categories.unspecified.totalPossibleWeight / jobMatchResult.scoreBreakdown.totalPossibleWeightedScore) * 100)}%`
+                                          : "0%"}
+                                      </td>
+                                    </tr>
+                                    <tr>
+                                      <td className="px-4 py-2.5 font-semibold text-blue-800 flex items-center gap-1.5">
+                                        <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+                                        Preferred
+                                      </td>
+                                      <td className="px-4 py-2.5 font-mono">{jobMatchResult.scoreBreakdown.categories.preferred.weightPerItem}</td>
+                                      <td className="px-4 py-2.5">
+                                        {jobMatchResult.scoreBreakdown.categories.preferred.matched} of {jobMatchResult.scoreBreakdown.categories.preferred.total}
+                                      </td>
+                                      <td className="px-4 py-2.5 font-mono">
+                                        {jobMatchResult.scoreBreakdown.categories.preferred.earnedWeight} / {jobMatchResult.scoreBreakdown.categories.preferred.totalPossibleWeight} pts
+                                      </td>
+                                      <td className="px-4 py-2.5 font-semibold text-gray-900">
+                                        {jobMatchResult.scoreBreakdown.totalPossibleWeightedScore > 0
+                                          ? `${Math.round((jobMatchResult.scoreBreakdown.categories.preferred.totalPossibleWeight / jobMatchResult.scoreBreakdown.totalPossibleWeightedScore) * 100)}%`
+                                          : "0%"}
+                                      </td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                            <p className="text-[11px] text-gray-400 italic">
+                              Note: Repeated mentions and synonyms in the job description are deduplicated according to CareerAI's skill taxonomy to prevent score inflation.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     )}
+
+                    {/* Prioritized Missing Skills (Action Plan) */}
+                    {jobMatchResult.prioritizedMissingSkills && jobMatchResult.prioritizedMissingSkills.length > 0 ? (
+                      <div className="rounded-2xl border border-red-100 bg-white p-6 shadow-sm space-y-4">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-red-50 text-red-600">
+                            <TrendingUp size={18} />
+                          </div>
+                          <div>
+                            <h4 className="text-base font-bold text-gray-900">Prioritized Missing Skills (Action Plan)</h4>
+                            <p className="text-xs text-gray-500">
+                              Ranked by priority category and potential match score impact so you know which skills to address first.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 pt-2">
+                          {jobMatchResult.prioritizedMissingSkills.map((item, index) => (
+                            <div
+                              key={item.name}
+                              className="rounded-xl border border-gray-100 bg-gradient-to-r from-gray-50/50 to-white p-4 transition hover:border-red-200"
+                            >
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2.5">
+                                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-xs font-bold text-white">
+                                    #{index + 1}
+                                  </span>
+                                  <span className="text-sm font-bold text-gray-900">{item.name}</span>
+                                  <span
+                                    className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                      item.priority === "required"
+                                        ? "bg-red-50 text-red-700 border border-red-200"
+                                        : item.priority === "unspecified"
+                                        ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                        : "bg-blue-50 text-blue-700 border border-blue-200"
+                                    }`}
+                                  >
+                                    {item.priority} (Weight {item.priorityWeight})
+                                  </span>
+                                </div>
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-bold text-emerald-700 border border-emerald-200">
+                                  +{item.potentialScoreImpact}% potential boost
+                                </span>
+                              </div>
+                              <p className="mt-2 text-xs text-gray-600 pl-8">
+                                {item.recommendation}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : jobMatchResult.breakdown && jobMatchResult.breakdown.length > 0 ? (
+                      <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5 text-center shadow-sm">
+                        <CheckCircle2 size={24} className="mx-auto text-emerald-600 mb-2" />
+                        <h4 className="text-sm font-bold text-emerald-900">All Recognized Requirements Met!</h4>
+                        <p className="mt-1 text-xs text-emerald-700">
+                          Your resume contains matching evidence for all recognized skills in this job description.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {/* Requirement-Level Evidence & Classification Explorer */}
+                    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-5">
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
+                            <ListFilter size={18} />
+                          </div>
+                          <div>
+                            <h4 className="text-base font-bold text-gray-900">Requirement-Level Evidence & Classification</h4>
+                            <p className="text-xs text-gray-500">
+                              Every recognized job requirement with extracted resume evidence and classification reasons.
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Filter Pills */}
+                        <div className="flex items-center gap-1 rounded-xl bg-gray-100 p-1 text-xs font-semibold">
+                          <button
+                            type="button"
+                            onClick={() => setRequirementFilter("all")}
+                            className={`rounded-lg px-3 py-1.5 transition ${
+                              requirementFilter === "all"
+                                ? "bg-white text-gray-900 shadow-sm"
+                                : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            All ({jobMatchResult.breakdown?.length || 0})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRequirementFilter("matched")}
+                            className={`rounded-lg px-3 py-1.5 transition ${
+                              requirementFilter === "matched"
+                                ? "bg-white text-emerald-700 shadow-sm"
+                                : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            Matched ({jobMatchResult.breakdown?.filter((r) => r.matched).length || 0})
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setRequirementFilter("missing")}
+                            className={`rounded-lg px-3 py-1.5 transition ${
+                              requirementFilter === "missing"
+                                ? "bg-white text-red-600 shadow-sm"
+                                : "text-gray-500 hover:text-gray-900"
+                            }`}
+                          >
+                            Missing ({jobMatchResult.breakdown?.filter((r) => !r.matched).length || 0})
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Requirements List */}
+                      {jobMatchResult.breakdown && jobMatchResult.breakdown.length > 0 ? (
+                        <div className="space-y-3">
+                          {jobMatchResult.breakdown
+                            .filter((item) => {
+                              if (requirementFilter === "matched") return item.matched;
+                              if (requirementFilter === "missing") return !item.matched;
+                              return true;
+                            })
+                            .map((item) => (
+                              <div
+                                key={item.name}
+                                className={`rounded-xl border p-4 transition ${
+                                  item.matched
+                                    ? "border-emerald-100 bg-emerald-50/20"
+                                    : "border-red-100 bg-red-50/20"
+                                }`}
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    {item.matched ? (
+                                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                                        <Check size={12} />
+                                      </div>
+                                    ) : (
+                                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-red-100 text-red-600">
+                                        <X size={12} />
+                                      </div>
+                                    )}
+                                    <span className="text-sm font-bold text-gray-900">{item.name}</span>
+                                    <span
+                                      className={`rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase ${
+                                        item.priority === "required"
+                                          ? "bg-red-50 text-red-700 border border-red-200"
+                                          : item.priority === "unspecified"
+                                          ? "bg-purple-50 text-purple-700 border border-purple-200"
+                                          : "bg-blue-50 text-blue-700 border border-blue-200"
+                                      }`}
+                                    >
+                                      {item.priority} (Weight {item.requirementWeight})
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    {item.matched ? (
+                                      <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
+                                        +{item.scoreContribution ?? 0}% earned
+                                      </span>
+                                    ) : (
+                                      <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
+                                        0% earned (potential +{item.potentialContribution ?? 0}%)
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="mt-3 grid gap-2 sm:grid-cols-2 text-xs">
+                                  {/* Classification Reason */}
+                                  <div className="rounded-lg bg-white/80 border border-gray-100 p-2.5">
+                                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider block">
+                                      Classification Reason
+                                    </span>
+                                    <span className="text-gray-700 mt-0.5 block">
+                                      {item.classificationReason || "Extracted from job description text"}
+                                    </span>
+                                  </div>
+
+                                  {/* Evidence or Missing Explanation */}
+                                  <div className="rounded-lg bg-white/80 border border-gray-100 p-2.5">
+                                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider block">
+                                      {item.matched ? "Resume Evidence" : "Match Status"}
+                                    </span>
+                                    {item.matched ? (
+                                      item.resumeEvidence ? (
+                                        <div className="mt-0.5 text-emerald-900 space-y-0.5">
+                                          <div className="font-medium">
+                                            Found {item.resumeEvidence.occurrences}x in:{" "}
+                                            <span className="font-semibold">{item.resumeEvidence.sections.join(", ")}</span>
+                                          </div>
+                                          {item.resumeEvidence.matchedTexts && item.resumeEvidence.matchedTexts.length > 0 && (
+                                            <p className="text-[11px] text-gray-600 italic">
+                                              &ldquo;{item.resumeEvidence.matchedTexts[0]}&rdquo;
+                                            </p>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-emerald-800 mt-0.5 block">
+                                          Confirmed in parsed resume skills.
+                                        </span>
+                                      )
+                                    ) : (
+                                      <span className="text-red-700 mt-0.5 block">
+                                        {item.missingExplanation || "Not identified in any analyzed resume section."}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400 italic">No recognized requirements to display.</p>
+                      )}
+                    </div>
 
                     {/* Additional Resume Skills */}
                     {jobMatchResult.additionalResumeSkills.length > 0 && (

@@ -601,4 +601,313 @@ Responsibilities:
   assert.ok(get("React") !== undefined, "React must be captured from Responsibilities section");
 });
 
+// ─── Phase 1 Explainability Tests ──────────────────────────────────────────
+
+// 40. All recognized requirements match
+test("40. Explainability: all recognized requirements match yields 100% and empty prioritizedMissingSkills", () => {
+  const parsed = parseJobDescription("Requirements:\nPython\nReact\nNice to have:\nDocker");
+  const match = calculateJobMatch(parsed.requirements, [
+    makeResumeSkill("Python", ["skills", "experience"]),
+    makeResumeSkill("React", ["projects"]),
+    makeResumeSkill("Docker", ["skills"]),
+  ]);
+
+  assert.equal(match.overallScore, 100);
+  assert.equal(match.missingRequired.length, 0);
+  assert.equal(match.missingPreferred.length, 0);
+  assert.ok(match.scoreBreakdown);
+  assert.equal(match.scoreBreakdown.totalRecognizedRequirements, 3);
+  assert.equal(match.scoreBreakdown.totalMatchedRequirements, 3);
+  assert.equal(match.scoreBreakdown.totalMissingRequirements, 0);
+  assert.equal(match.scoreBreakdown.totalPossibleWeightedScore, 2.5); // 1.0 + 1.0 + 0.5
+  assert.equal(match.scoreBreakdown.earnedWeightedScore, 2.5);
+  assert.equal(match.scoreBreakdown.finalMatchPercentage, 100);
+  assert.deepEqual(match.prioritizedMissingSkills, []);
+
+  // Every item has scoreContribution equal to potentialContribution
+  for (const item of match.breakdown) {
+    assert.equal(item.matched, true);
+    assert.ok(item.scoreContribution && item.scoreContribution > 0);
+    assert.equal(item.scoreContribution, item.potentialContribution);
+    assert.equal(item.missingExplanation, undefined);
+  }
+});
+
+// 41. No recognized requirements match
+test("41. Explainability: no recognized requirements match yields 0% and all skills in prioritizedMissingSkills", () => {
+  const parsed = parseJobDescription("Requirements:\nPython\nReact\nNice to have:\nDocker");
+  const match = calculateJobMatch(parsed.requirements, [
+    makeResumeSkill("Java"), // not in JD
+  ]);
+
+  assert.equal(match.overallScore, 0);
+  assert.ok(match.scoreBreakdown);
+  assert.equal(match.scoreBreakdown.totalMatchedRequirements, 0);
+  assert.equal(match.scoreBreakdown.totalMissingRequirements, 3);
+  assert.equal(match.scoreBreakdown.earnedWeightedScore, 0);
+  assert.equal(match.scoreBreakdown.finalMatchPercentage, 0);
+  assert.equal(match.prioritizedMissingSkills?.length, 3);
+
+  // Missing required skills must precede preferred skills
+  assert.equal(match.prioritizedMissingSkills![0].priority, "required");
+  assert.equal(match.prioritizedMissingSkills![1].priority, "required");
+  assert.equal(match.prioritizedMissingSkills![2].priority, "preferred");
+
+  for (const item of match.breakdown) {
+    assert.equal(item.matched, false);
+    assert.equal(item.scoreContribution, 0);
+    assert.ok(item.potentialContribution && item.potentialContribution > 0);
+    assert.ok(item.missingExplanation?.includes("not detected in any section"));
+  }
+});
+
+// 42. Required and preferred weights and distinct score contributions
+test("42. Explainability: required (1.0) and preferred (0.5) contribute proportionally", () => {
+  const parsed = parseJobDescription("Requirements:\nReact\nNice to have:\nAWS");
+  // Total weight: React(1.0) + AWS(0.5) = 1.5
+  // React contribution: 1.0 / 1.5 * 100 = 66.67%
+  // AWS contribution: 0.5 / 1.5 * 100 = 33.33%
+  const match = calculateJobMatch(parsed.requirements, [
+    makeResumeSkill("React"),
+  ]);
+
+  const reactItem = match.breakdown.find((i) => i.name === "React");
+  const awsItem = match.breakdown.find((i) => i.name === "AWS");
+
+  assert.equal(reactItem?.requirementWeight, 1.0);
+  assert.equal(awsItem?.requirementWeight, 0.5);
+  assert.equal(reactItem?.scoreContribution, 66.67);
+  assert.equal(awsItem?.scoreContribution, 0);
+  assert.equal(awsItem?.potentialContribution, 33.33);
+  assert.equal(match.overallScore, 66.67);
+});
+
+// 43. Unspecified requirement uses 0.75 weight
+test("43. Explainability: unspecified requirement uses 0.75 weight and calculates score accurately", () => {
+  const parsed = parseJobDescription("Looking for a developer skilled in React and TypeScript.");
+  // Both unspecified: React(0.75) + TypeScript(0.75) = 1.5
+  const match = calculateJobMatch(parsed.requirements, [
+    makeResumeSkill("React"),
+  ]);
+
+  assert.equal(match.overallScore, 50);
+  assert.ok(match.scoreBreakdown);
+  assert.equal(match.scoreBreakdown.categories.unspecified.total, 2);
+  assert.equal(match.scoreBreakdown.categories.unspecified.matched, 1);
+  assert.equal(match.scoreBreakdown.categories.unspecified.missing, 1);
+  assert.equal(match.scoreBreakdown.categories.unspecified.weightPerItem, 0.75);
+  assert.equal(match.scoreBreakdown.categories.unspecified.totalPossibleWeight, 1.5);
+  assert.equal(match.scoreBreakdown.categories.unspecified.earnedWeight, 0.75);
+});
+
+// 44. Duplicate mentions in JD do not inflate score
+test("44. Explainability: duplicate skill mentions in JD collapse to single requirement without inflating score", () => {
+  const parsed = parseJobDescription(`
+Requirements:
+- Python
+- React
+Must have strong Python experience.
+Python is core to the role.
+  `);
+
+  const pythonReq = parsed.requirements.find((r) => r.name === "Python");
+  assert.equal(pythonReq?.occurrences, 3);
+  assert.equal(parsed.requirements.filter((r) => r.name === "Python").length, 1);
+
+  const match = calculateJobMatch(parsed.requirements, [
+    makeResumeSkill("Python"),
+  ]);
+
+  // Total requirements: Python (1.0) + React (1.0) = 2.0. Python matched = 1.0 / 2.0 = 50%
+  assert.equal(match.overallScore, 50);
+  assert.equal(match.scoreBreakdown?.totalRecognizedRequirements, 2);
+  assert.equal(match.scoreBreakdown?.totalPossibleWeightedScore, 2.0);
+  assert.equal(match.scoreBreakdown?.earnedWeightedScore, 1.0);
+});
+
+// 45. Ambiguous skills retain disambiguation behavior and have classification reason
+test("45. Explainability: ambiguous language C only matches in explicit required context with clear reason", () => {
+  const inProse = parseJobDescription("We are looking for grade C candidates who go to college.");
+  assert.equal(inProse.requirements.some((r) => r.name === "C"), false);
+  assert.equal(inProse.requirements.some((r) => r.name === "Go"), false);
+
+  const inRequired = parseJobDescription("Requirements:\n- C\n- Go");
+  const cReq = inRequired.requirements.find((r) => r.name === "C");
+  assert.ok(cReq);
+  assert.equal(cReq?.priority, "required");
+  assert.ok(cReq?.classificationReason?.includes("required"));
+
+  const match = calculateJobMatch(inRequired.requirements, [
+    makeResumeSkill("C", ["skills"]),
+  ]);
+  const cBreakdown = match.breakdown.find((b) => b.name === "C");
+  assert.equal(cBreakdown?.matched, true);
+  assert.ok(cBreakdown?.classificationReason);
+});
+
+// 46. Evidence association
+test("46. Explainability: resume evidence accurately records occurrences, sections, and matched texts", () => {
+  const parsed = parseJobDescription("Requirements:\nReact");
+  const match = calculateJobMatch(parsed.requirements, [
+    {
+      name: "React",
+      category: "Frontend",
+      occurrences: 4,
+      sections: ["skills", "projects", "experience"],
+      matchedTexts: ["React", "React.js", "ReactJS"],
+    },
+  ]);
+
+  const reactMatch = match.matchedRequired[0];
+  assert.ok(reactMatch.resumeEvidence);
+  assert.equal(reactMatch.resumeEvidence?.occurrences, 4);
+  assert.deepEqual(reactMatch.resumeEvidence?.sections, ["skills", "projects", "experience"]);
+  assert.deepEqual(reactMatch.resumeEvidence?.matchedTexts, ["React", "React.js", "ReactJS"]);
+});
+
+// 47. Classification explanations reflect actual parser rules
+test("47. Explainability: classificationReason differentiates explicit marker from section inheritance", () => {
+  const jd = `
+We are looking for Python engineers.
+
+Requirements:
+- React
+- SQL: must-have
+- Docker
+
+Preferred:
+- AWS
+  `;
+
+  const parsed = parseJobDescription(jd);
+  const get = (name: string) => parsed.requirements.find((r) => r.name === name);
+
+  // Python: in prose without markers
+  assert.equal(get("Python")?.priority, "unspecified");
+  assert.ok(get("Python")?.classificationReason?.includes("unspecified"));
+
+  // React: inherited from Requirements heading
+  assert.equal(get("React")?.priority, "required");
+  assert.ok(get("React")?.classificationReason?.includes("Inherited 'required'"));
+
+  // SQL: explicit must-have keyword on line
+  assert.equal(get("SQL")?.priority, "required");
+  assert.ok(get("SQL")?.classificationReason?.includes("Explicit 'required'"));
+
+  // AWS: inherited from Preferred heading
+  assert.equal(get("AWS")?.priority, "preferred");
+  assert.ok(get("AWS")?.classificationReason?.includes("preferred"));
+});
+
+// 48. Prioritized missing skills ordering and recommendations
+test("48. Explainability: prioritizedMissingSkills correctly ranks required before unspecified before preferred", () => {
+  const parsed = parseJobDescription(`
+We are seeking a developer with TypeScript experience.
+
+Requirements:
+- React
+- Node.js
+
+Nice to have:
+- AWS
+  `);
+
+  const match = calculateJobMatch(parsed.requirements, []); // empty resume
+
+  assert.equal(match.prioritizedMissingSkills?.length, 4);
+  const priorities = match.prioritizedMissingSkills?.map((s) => s.priority);
+
+  // Two required (React, Node.js), one unspecified (TypeScript), one preferred (AWS)
+  assert.equal(priorities![0], "required");
+  assert.equal(priorities![1], "required");
+  assert.equal(priorities![2], "unspecified");
+  assert.equal(priorities![3], "preferred");
+
+  // Each missing skill has positive potentialScoreImpact and non-empty recommendation
+  for (const s of match.prioritizedMissingSkills!) {
+    assert.ok(s.potentialScoreImpact > 0);
+    assert.ok(s.recommendation.length > 10);
+    assert.ok(s.classificationReason.length > 5);
+  }
+});
+
+// 49. Empty JD handling
+test("49. Explainability: empty JD returns null overallScore and complete empty scoreBreakdown", () => {
+  const match = calculateJobMatch([], [makeResumeSkill("React")]);
+
+  assert.equal(match.overallScore, null);
+  assert.ok(match.scoreBreakdown);
+  assert.equal(match.scoreBreakdown.totalRecognizedRequirements, 0);
+  assert.equal(match.scoreBreakdown.totalMatchedRequirements, 0);
+  assert.equal(match.scoreBreakdown.totalPossibleWeightedScore, 0);
+  assert.equal(match.scoreBreakdown.finalMatchPercentage, null);
+  assert.deepEqual(match.prioritizedMissingSkills, []);
+});
+
+// 50. Additional resume skills do not inflate score
+test("50. Explainability: additional resume skills do not inflate totalPossibleWeightedScore or earnedWeightedScore", () => {
+  const parsed = parseJobDescription("Requirements:\nReact");
+  const match = calculateJobMatch(parsed.requirements, [
+    makeResumeSkill("React"),
+    makeResumeSkill("Docker"),
+    makeResumeSkill("Kubernetes"),
+    makeResumeSkill("AWS"),
+    makeResumeSkill("Python"),
+  ]);
+
+  assert.equal(match.overallScore, 100);
+  assert.equal(match.additionalResumeSkills.length, 4);
+  assert.equal(match.scoreBreakdown?.totalPossibleWeightedScore, 1.0);
+  assert.equal(match.scoreBreakdown?.earnedWeightedScore, 1.0);
+});
+
+// 51. Mathematical consistency: sum of earned score matches finalMatchPercentage within floating point tolerance
+test("51. Explainability: mathematical consistency check on realistic multi-skill match", () => {
+  const parsed = parseJobDescription(`
+Requirements:
+- Python
+- React
+- SQL
+
+Preferred:
+- AWS
+- Docker
+
+We also use TypeScript and Git.
+  `);
+
+  const match = calculateJobMatch(parsed.requirements, [
+    makeResumeSkill("Python"),
+    makeResumeSkill("SQL"),
+    makeResumeSkill("Docker"),
+    makeResumeSkill("Git"),
+  ]);
+
+  assert.ok(match.scoreBreakdown);
+  const bd = match.scoreBreakdown;
+
+  // Verify counts
+  assert.equal(bd.totalMatchedRequirements + bd.totalMissingRequirements, bd.totalRecognizedRequirements);
+
+  // Verify earned vs possible
+  const expectedEarned =
+    bd.categories.required.earnedWeight +
+    bd.categories.preferred.earnedWeight +
+    bd.categories.unspecified.earnedWeight;
+
+  const expectedPossible =
+    bd.categories.required.totalPossibleWeight +
+    bd.categories.preferred.totalPossibleWeight +
+    bd.categories.unspecified.totalPossibleWeight;
+
+  assert.equal(bd.earnedWeightedScore, Math.round(expectedEarned * 100) / 100);
+  assert.equal(bd.totalPossibleWeightedScore, Math.round(expectedPossible * 100) / 100);
+
+  // Percentage consistency
+  const calculatedPercentage = Math.round((bd.earnedWeightedScore / bd.totalPossibleWeightedScore) * 10000) / 100;
+  assert.equal(match.overallScore, calculatedPercentage);
+  assert.equal(bd.finalMatchPercentage, calculatedPercentage);
+});
+
+
 

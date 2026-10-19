@@ -573,6 +573,35 @@ $$\text{Match Score} = \left(\frac{\sum \text{Weights of matched recognized requ
 - **Duplicate requirements:** Deduplicated in `parseJobDescription`; elevated priority wins (`required` > `preferred` > `unspecified`).
 - **Ambiguous skills:** One-letter/ambiguous skills (C, Go, R) only match in JD when found under an explicit `required` or `preferred` context.
 
+### 7.4 Explainable Scoring Capabilities (Phase 1 Implementation)
+
+The system provides comprehensive mathematical transparency, requirement-level evidence tracing, deterministic priority classification reasoning, and prioritized missing-skill action plans:
+
+1. **Requirement-Level Explainability (`JobMatchBreakdown`):**
+   - `classificationReason`: Deterministically explains why each requirement was assigned its priority (e.g., explicitly marked via keyword rules like "must have", inherited from surrounding section headings like "Qualifications:", or inferred from general job description text).
+   - `resumeEvidence`: Preserves extracted textual quotes, resume sections (`Experience`, `Skills`, `Projects`), and occurrence counts without fabricating confidence percentages.
+   - `missingExplanation`: Clear diagnostic explanation for missing skills ("Skill not detected in any analyzed resume section.").
+   - `scoreContribution`: Exact weighted percentage contributed by a matched skill to the final score:
+     $$\text{scoreContribution} = \left(\frac{w_{\text{skill}}}{W_{\text{total}}}\right) \times 100$$
+   - `potentialContribution`: Exact potential score increase if a missing skill is acquired and verified on the resume.
+
+2. **Transparent Mathematical Score Breakdown (`JobMatchScoreBreakdown`):**
+   - `totalRecognizedRequirements`, `totalMatchedRequirements`, `totalMissingRequirements`
+   - `totalPossibleWeightedScore`, `earnedWeightedScore`, `finalMatchPercentage`
+   - `calculationFormula`: Complete string showing dynamic calculation: `(${earnedWeightedScore} / ${totalPossibleWeightedScore}) * 100 = ${finalMatchPercentage}%`
+   - `categories`: Per-category (`required`, `preferred`, `unspecified`) breakdown containing item count, matched count, missing count, weight per item, total possible weight, and earned weight.
+
+3. **Deterministic Missing-Skill Prioritization (`prioritizedMissingSkills`):**
+   - Ordered deterministically: `required` (1.0 weight) $\rightarrow$ `unspecified` (0.75 weight) $\rightarrow$ `preferred` (0.5 weight), with secondary tie-breaking by potential score impact descending.
+   - Generates actionable, role-relevant recommendations explaining why the skill matters based on its job description priority.
+
+4. **Frontend Explainability Panel (`ResumePage.tsx`):**
+   - 4-card metric overview (Overall Job Match Score, Required Skills, Preferred Skills, Unspecified Skills).
+   - Collapsible Mathematical Score Breakdown panel with formula and category weights table.
+   - Prioritized Missing Skills Action Plan with rank, weight, potential score boost, and recommendation.
+   - Requirement-by-Requirement Evidence & Classification Explorer with interactive filter tabs (`All`, `Matched`, `Missing`), classification reasons, and extracted resume evidence snippets.
+
+
 ---
 
 ## 8. AI Integration Pipeline
@@ -883,12 +912,12 @@ node -r ts-node/register --test `
 ```
 
 ### 15.2 Actual Verification Results
-- **Total Tests Executed:** 115 tests
-- **Passing Tests:** 115
+- **Total Tests Executed:** 127 tests
+- **Passing Tests:** 127
 - **Failing Tests:** 0
-- **Execution Duration:** 14.94 seconds
+- **Execution Duration:** ~2.4 seconds
 - **Breakdown by Test File:**
-  - `jobMatch.service.test.ts`: 39 tests passed (covering formulas, weights, priority inheritance, ambiguous skills, and realistic JDs).
+  - `jobMatch.service.test.ts`: 51 tests passed (covering formulas, weights, priority inheritance, ambiguous skills, realistic JDs, and 12 dedicated explainability scenarios: score breakdowns, prioritized missing skills, classification reasons, resume evidence extraction, duplicate collapse, and zero inflation).
   - `profileCompleteness.service.test.ts`: 17 tests passed (covering empty states, required vs optional fields, and profile flags).
   - `projectAnalysis.service.test.ts`: 11 tests passed (covering verb counts, technical depth diminishing returns, URL evidence, and domains).
   - `projectJobMatching.service.test.ts`: 4 tests passed (covering required/preferred project relevance, domain alignment, and job value).

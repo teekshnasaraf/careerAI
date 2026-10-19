@@ -12,6 +12,51 @@ export interface JobMatchBreakdown {
     sections: string[];
     matchedTexts: string[];
   };
+  classificationReason?: string;
+  scoreContribution?: number;
+  potentialContribution?: number;
+  scoreImpactExplanation?: string;
+  missingExplanation?: string;
+}
+
+export interface JobMatchCategorySummary {
+  total: number;
+  matched: number;
+  missing: number;
+  weightPerItem: number;
+  totalPossibleWeight: number;
+  earnedWeight: number;
+}
+
+export interface JobMatchScoreBreakdown {
+  totalRecognizedRequirements: number;
+  totalMatchedRequirements: number;
+  totalMissingRequirements: number;
+  totalPossibleWeightedScore: number;
+  earnedWeightedScore: number;
+  finalMatchPercentage: number | null;
+  priorityWeights: {
+    required: number;
+    preferred: number;
+    unspecified: number;
+  };
+  categories: {
+    required: JobMatchCategorySummary;
+    preferred: JobMatchCategorySummary;
+    unspecified: JobMatchCategorySummary;
+  };
+  calculationFormula: string;
+  summaryExplanation: string;
+}
+
+export interface PrioritizedMissingSkill {
+  name: string;
+  category: string;
+  priority: "required" | "preferred" | "unspecified";
+  priorityWeight: number;
+  potentialScoreImpact: number;
+  classificationReason: string;
+  recommendation: string;
 }
 
 export interface AdditionalResumeSkill {
@@ -33,6 +78,11 @@ export interface JobMatchResult {
   missingUnspecified: JobMatchBreakdown[];
   additionalResumeSkills: AdditionalResumeSkill[];
   breakdown: JobMatchBreakdown[];
+  // Backwards compatibility aliases
+  unspecifiedMatched?: JobMatchBreakdown[];
+  unspecifiedMissing?: JobMatchBreakdown[];
+  scoreBreakdown?: JobMatchScoreBreakdown;
+  prioritizedMissingSkills?: PrioritizedMissingSkill[];
 }
 
 export interface ProjectJobRelevance {

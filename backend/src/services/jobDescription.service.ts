@@ -10,6 +10,7 @@ export interface JobRequirement {
   priority: RequirementPriority;
   occurrences: number;
   matchedTexts: string[];
+  classificationReason?: string;
 }
 
 export interface ParsedJobDescription {
@@ -79,6 +80,7 @@ const determineLinePriority = (line: string, current: RequirementPriority): Requ
  * 3. Matches canonical skills via existing SKILL_TAXONOMY aliases.
  * 4. Deduplicates multiple mentions into a single canonical requirement while tracking occurrences.
  * 5. Elevated priority wins if a skill is mentioned in multiple contexts (e.g., required > unspecified).
+ * 6. Records the classification reason for explainable scoring.
  */
 export const parseJobDescription = (jobDescription: string): ParsedJobDescription => {
   if (!jobDescription || typeof jobDescription !== "string") {
@@ -102,11 +104,26 @@ export const parseJobDescription = (jobDescription: string): ParsedJobDescriptio
     const line = rawLine.trim();
     if (!line) continue;
 
+    const hasRequiredMarker = requiredMarker.test(line);
+    const hasPreferredMarker = preferredMarker.test(line);
     const priority = determineLinePriority(line, currentPriority);
     const hasPriorityMarker =
       priority !== currentPriority ||
-      requiredMarker.test(line) ||
-      preferredMarker.test(line);
+      hasRequiredMarker ||
+      hasPreferredMarker;
+
+    let lineReason = "";
+    if (hasRequiredMarker) {
+      lineReason = "Explicit 'required' qualification keyword on line";
+    } else if (hasPreferredMarker) {
+      lineReason = "Explicit 'preferred' / 'nice-to-have' qualification keyword on line";
+    } else if (priority === "required") {
+      lineReason = "Inherited 'required' priority from section heading";
+    } else if (priority === "preferred") {
+      lineReason = "Inherited 'preferred' priority from section heading";
+    } else {
+      lineReason = "Inferred as unspecified from general job description prose";
+    }
 
     currentPriority = priority;
 
@@ -130,6 +147,7 @@ export const parseJobDescription = (jobDescription: string): ParsedJobDescriptio
         }
         if (priorityRank[priority] > priorityRank[existing.priority]) {
           existing.priority = priority;
+          existing.classificationReason = lineReason;
         }
       } else {
         requirements.set(definition.name, {
@@ -140,6 +158,7 @@ export const parseJobDescription = (jobDescription: string): ParsedJobDescriptio
           priority,
           occurrences: 1,
           matchedTexts: [matchedText],
+          classificationReason: lineReason,
         });
       }
     }
