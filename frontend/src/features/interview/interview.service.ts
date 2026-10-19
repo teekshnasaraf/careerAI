@@ -10,6 +10,8 @@ export interface QuestionEntry {
   parentQuestionId?: string;
   followupReason?: string;
   resumeReference?: string;
+  repositoryFinding?: string;
+  fileReference?: string;
 }
 
 export interface EvaluationEntry {
@@ -61,6 +63,13 @@ export interface InterviewSessionData {
   currentQuestionIndex?: number;
   nextAction?: string;
   nextActionReason?: string;
+  projectEvidenceId?: string;
+  projectContext?: {
+    projectTitle: string;
+    repositoryUrl: string;
+    findingsSummary?: string;
+    primaryTechnologies?: string[];
+  };
   questions: QuestionEntry[];
   responses: EvaluationEntry[];
   overallScore: number;
@@ -130,6 +139,7 @@ export const startInterviewSessionApi = async (params: {
   targetRole: string;
   jobDescription?: string;
   isAdaptive?: boolean;
+  projectEvidenceId?: string;
 }): Promise<{ success: boolean; data: InterviewSessionData }> => {
   const response = await api.post("/interview/start", params);
   return response.data;

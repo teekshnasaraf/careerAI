@@ -35,6 +35,7 @@ To maintain strict documentation integrity, the repository has been audited dire
 | **Project-to-JD Relevance Matching** | **Fully Implemented** | Per-project job value scoring based on required/preferred skill coverage, domain alignment, and responsibility alignment in [projectJobMatching.service.ts](file:///d:/coding/careerAI/backend/src/services/projectJobMatching.service.ts). |
 | **Google Gemini AI Pipeline** | **Fully Implemented** | Multi-model fallback (`gemini-2.0-flash` -> `gemma-4-26b-a4b-it` -> `gemini-2.0-flash-lite`) with rule-based fallback in [ai.service.ts](file:///d:/coding/careerAI/backend/src/services/ai.service.ts). |
 | **Adaptive AI Interview Engine** | **Fully Implemented** | Dynamic question adaptation, 5-dimension engineering rubric evaluation, decision policy (follow-ups/difficulty tuning), topic prioritization from JD and roadmap gaps, and session recovery in [adaptiveInterview.service.ts](file:///d:/coding/careerAI/backend/src/services/adaptiveInterview.service.ts) and [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts). |
+| **GitHub Project Evidence Verification** | **Fully Implemented** | SSRF-safe GitHub repository fetching, manifest vs observed dependency analysis, architectural signal extraction, 4-status claim verification rubric, prompt-injection defense, and grounded adaptive interview questions in [githubEvidence.service.ts](file:///d:/coding/careerAI/backend/src/services/githubEvidence.service.ts), [ProjectEvidence.ts](file:///d:/coding/careerAI/backend/src/models/ProjectEvidence.ts), [projectEvidence.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/projectEvidence.controller.ts), and [projectEvidence.service.ts](file:///d:/coding/careerAI/frontend/src/features/projectEvidence/projectEvidence.service.ts). |
 | **User Authentication & Authorization** | **Fully Implemented** | Bcrypt hashing, JWT issuance/verification, Zod request body validation in [auth.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/auth.controller.ts) and [auth.middleware.ts](file:///d:/coding/careerAI/backend/src/middleware/auth.middleware.ts). |
 | **Cloud File Storage** | **Fully Implemented** | Cloudinary raw resource upload with local disk fallback in [cloudinary.ts](file:///d:/coding/careerAI/backend/src/config/cloudinary.ts). |
 | **Skill Dependency Graph & Roadmap** | **Fully Implemented** | Directed acyclic graph (DAG) cycle detection (3-color DFS), topological sorting (Kahn's algorithm with priority tie-breaking), transitive dependency expansion, and interactive personalized roadmap tracking in [skillGraph.service.ts](file:///d:/coding/careerAI/backend/src/services/skillGraph.service.ts), [roadmap.service.ts](file:///d:/coding/careerAI/backend/src/services/roadmap.service.ts), and [Roadmap.ts](file:///d:/coding/careerAI/backend/src/models/Roadmap.ts). |
@@ -830,6 +831,9 @@ erDiagram
     User ||--o{ InterviewSession : "conducts"
     User ||--o{ Roadmap : "tracks"
     User ||--o{ Progress : "aggregates"
+    User ||--o{ ProjectEvidence : "owns"
+    Resume ||--o{ ProjectEvidence : "links"
+    ProjectEvidence ||--o{ InterviewSession : "grounds"
     User ||--|| UserSettings : "configures"
 
     User {
@@ -891,9 +895,32 @@ erDiagram
         date updatedAt
     }
 
+    ProjectEvidence {
+        ObjectId _id PK
+        ObjectId user FK
+        ObjectId resumeId FK
+        string projectTitle
+        string repositoryUrl
+        string owner
+        string repo
+        string defaultBranch
+        object metadata
+        string[] filesScanned
+        object[] declaredDependencies
+        string[] observedImports
+        object[] architecturalSignals
+        object[] claimAssessments
+        string summary
+        object[] interviewQuestions
+        date createdAt
+        date updatedAt
+    }
+
     InterviewSession {
         ObjectId _id PK
         ObjectId user FK
+        ObjectId projectEvidenceId FK
+        object projectContext
         string mode
         string difficulty
         number length
@@ -1062,11 +1089,71 @@ Topics are ranked deterministically by combining multiple data sources:
   - Non-empty answers are scored deterministically by parsing technical terminology density, structural length, and concept relevance against the 5-dimension rubric.
   - Curated question banks across all taxonomy skills guarantee immediate question delivery.
 
-### 13.2 Progress Tracking & Weekly Coach
+### 13.2 GitHub Project Evidence Verification (Phase 4 Implementation)
+
+Phase 4 enables candidates to connect GitHub repositories to the technical projects claimed on their resume. The system inspects accessible repository contents via the official GitHub REST API, collects verifiable code-level evidence, differentiates between declared dependencies and actual source imports, detects architectural signals, evaluates claims across 4 standardized evidence statuses, and synthesizes repository-grounded technical interview questions.
+
+#### 13.2.1 Architectural Flow & Security Controls
+1. **Server-Side Request Forgery (SSRF) Prevention:**
+   - [githubEvidence.service.ts](file:///d:/coding/careerAI/backend/src/services/githubEvidence.service.ts) implements `validateAndNormalizeGitHubUrl`.
+   - Rejects non-GitHub domains (`gitlab.com`, `bitbucket.org`, arbitrary URLs).
+   - Rejects localhost (`localhost`, `127.0.0.1`, `::1`), link-local metadata addresses (`169.254.169.254`), private IP ranges (`10.x.x.x`, `192.168.x.x`, `172.16-31.x.x`), and embedded credentials (`user:pass@host`).
+   - Normalizes valid URLs to canonical `https://github.com/:owner/:repo` and extracts clean `:owner` and `:repo` identifiers.
+2. **Safe Resource Boundaries:**
+   - **Repository Tree Limits:** Fetches git tree via official GitHub API (`GET /repos/:owner/:repo/git/trees/:branch?recursive=1`), capped at 300 tree entries.
+   - **File Size Caps:** Limits individual inspected file fetches to 50 KB (`50 * 1024` bytes) using raw GitHub content endpoints with timeout controls.
+   - **Prioritized Scanning:** Files are selectively inspected based on evidence value: manifests (`package.json`, `requirements.txt`, `go.mod`), documentation (`README.md`), test suites, container configs (`Dockerfile`, `docker-compose.yml`), CI/CD workflows (`.github/workflows/`), and core source files (`.ts`, `.js`, `.py`, `.go`, `.java`). Indiscriminate repository downloading is strictly avoided.
+3. **Prompt Injection & Untrusted Input Sanitization:**
+   - Repository code, README markdown, comments, and commit messages are classified as untrusted user data.
+   - `sanitizeForPrompt()` strips delimiter collisions, instruction overrides (`"ignore previous instructions"`, `"system prompt"`), and script tags before passing code snippets into LLM contexts.
+   - All interview generation prompts treat repository text strictly as data payloads within delimited blocks.
+
+#### 13.2.2 Manifest Parsing vs. Observed Usage
+The evidence engine distinguishes between **declared dependencies** and **observed source imports**:
+- **Declared Dependencies:** Extracted deterministically from dependency manifests:
+  - Node.js: `dependencies` and `devDependencies` from `package.json`.
+  - Python: Pinned packages and libraries from `requirements.txt`.
+  - Go: Module dependencies and version declarations from `go.mod`.
+- **Observed Source Imports:** Extracted by scanning AST-level import and require patterns across source code files:
+  - Regex patterns identify: `import ... from '...'`, `require('...')`, `import ...`, and `from ... import ...`.
+- **Significance:** A dependency listed in `package.json` without any matching source import is categorized as declared-only, preventing candidates from artificially inflating match scores by simply adding unused dependencies to manifests.
+
+#### 13.2.3 Architectural Signal Detection
+The engine scans repository file paths and source contents to identify six production engineering patterns:
+| Signal Pattern | Detection Rules & Triggers | Provenance Files |
+| :--- | :--- | :--- |
+| **API Routes** | Route handlers, Express `router.get/post`, FastAPI `@app.get/post`, Flask routes. | `src/routes/*`, `controllers/*`, `routes.py`, `api/*` |
+| **Database Models** | ORM schemas, Mongoose `new Schema`, Prisma schema, Sequelize definitions, SQLAlchemy models. | `models/*`, `schema.prisma`, `entities/*`, `models.py` |
+| **Authentication** | JWT signing/verification, Bcrypt hashing, OAuth flows, passport strategies, session cookies. | `auth/*`, `passport.ts`, `middleware/auth*` |
+| **Test Suites** | Unit and integration tests, Jest/Mocha configs, Pytest assertions, testing utilities. | `*.test.ts`, `*.spec.js`, `tests/*`, `jest.config.*` |
+| **CI/CD Automation**| GitHub Actions workflows, pipeline definitions, automated build/test steps. | `.github/workflows/*.yml`, `.gitlab-ci.yml` |
+| **Containerization**| Docker container definitions, multi-container orchestration. | `Dockerfile`, `docker-compose.yml`, `Containerfile` |
+
+#### 13.2.4 Claim-to-Evidence Matching Rubric & 4 Evidence Statuses
+Each resume claim (skill, tool, or framework) associated with the project is matched against repository findings using canonical taxonomy resolution and common ecosystem aliases (e.g., `"PostgreSQL"` matches `pg`, `"MongoDB"` matches `mongoose`, `"Authentication"` matches `jsonwebtoken`/`bcrypt`).
+
+Every claim is assigned one of four distinct, non-inflated statuses:
+1. **`supported`:** Direct implementation observed in source imports or architectural models with verified file references and provenance snippets.
+2. **`partially_supported`:** Claim is listed as a declared dependency in manifests or described in the README, but no direct source code imports or active usage were located in the scanned files.
+3. **`not_found`:** Scanned repository contents did not reveal matching dependencies, imports, or documentation references.
+4. **`unable_to_assess`:** File or repository was inaccessible, oversized, unsupported, or repository tree could not be retrieved.
+
+> [!IMPORTANT]
+> **Ethical Boundary & Non-Attribution Principle:**
+> CareerAI treats repository evidence as supporting or challenging a claim, but **never as definitive proof of authorship or individual competency**. Shared repositories, squash merges, paired programming, and forks limit attribution. Missing evidence is explicitly never classified as proof of a false claim.
+
+#### 13.2.5 Grounded Adaptive Technical Interview Integration
+Findings from `ProjectEvidence` seamlessly ground Phase 3's adaptive interview engine:
+- `POST /api/interview/start` accepts an optional `projectEvidenceId`.
+- The controller verifies candidate ownership of the evidence document and prepends verified project technologies to the prioritized topic queue.
+- `generateProjectInterviewQuestions` produces technical questions tied directly to detected file paths, database schemas, API routes, or architectural choices (e.g., querying why Mongoose was chosen, how JWT revocation is handled, or how test coverage is structured).
+- Questions retain provenance metadata (`repositoryFinding`, `fileReference`), which are displayed in the interactive interview workbench.
+
+### 13.3 Progress Tracking & Weekly Coach
 - **Endpoint:** `GET /api/progress/stats`.
 - **Metrics Aggregated:** Current resume score, ATS score, average mock interview score, active learning roadmap completion %, questions solved count, unlocked achievements (6 tiered achievements), chronological timeline, weak topics, and personalized weekly coach guidance.
 
-### 13.3 User Settings & Career Goals
+### 13.4 User Settings & Career Goals
 - **Endpoints:** `GET /api/settings`, `PUT /api/settings`.
 - **Configurable Sections:**
   - `profile`: Name, college, degree, graduation year, LinkedIn, GitHub, portfolio, bio.
@@ -1100,9 +1187,13 @@ Topics are ranked deterministically by combining multiple data sources:
 | `GET` | `/api/interview/stats` | Yes | `interview.controller.getInterviewHistoryStats`| None | `{ success: true, data: { questionsSolved, mockInterviewsCompleted, ... } }` |
 | `GET` | `/api/interview/active` | Yes | `interview.controller.getActiveInterviewSession` | None | `{ success: true, data: InterviewSession \| null }` |
 | `GET` | `/api/interview/session/:id` | Yes | `interview.controller.getInterviewSessionById` | URL Param `:id` | `{ success: true, data: InterviewSession }` |
-| `POST` | `/api/interview/start` | Yes | `interview.controller.startInterviewSession` | `{ mode, difficulty, length, targetCompany, targetRole, isAdaptive?, jobDescription? }` | `{ success: true, data: InterviewSession }` |
+| `POST` | `/api/interview/start` | Yes | `interview.controller.startInterviewSession` | `{ mode, difficulty, length, targetCompany, targetRole, isAdaptive?, jobDescription?, projectEvidenceId? }` | `{ success: true, data: InterviewSession }` |
 | `POST` | `/api/interview/submit-answer` | Yes | `interview.controller.submitQuestionAnswer` | `{ sessionId, questionId, questionText, userAnswer }` | `{ success: true, data: { sessionId, evaluation, nextQuestion?, isFinished? } }` |
 | `POST` | `/api/interview/finish` | Yes | `interview.controller.finishInterviewSession` | `{ sessionId }` | `{ success: true, data: InterviewSession }` |
+| `POST` | `/api/project-evidence/analyze` | Yes | `projectEvidence.controller.analyzeProjectEvidence` | `{ repositoryUrl, projectTitle, resumeId?, claimedSkills? }` | `{ success: true, data: ProjectEvidenceDocument }` |
+| `GET` | `/api/project-evidence` | Yes | `projectEvidence.controller.getAllUserProjectEvidence` | None | `{ success: true, data: ProjectEvidenceDocument[] }` |
+| `GET` | `/api/project-evidence/:id` | Yes | `projectEvidence.controller.getProjectEvidence` | URL Param `:id` | `{ success: true, data: ProjectEvidenceDocument }` |
+| `DELETE` | `/api/project-evidence/:id` | Yes | `projectEvidence.controller.deleteProjectEvidence` | URL Param `:id` | `{ success: true, message: "Project evidence deleted successfully" }` |
 | `GET` | `/api/progress/stats` | Yes | `progress.controller.getProgressStats` | None | `{ success: true, data: { currentResumeScore, achievements, activeRoadmap, ... } }` |
 | `GET` | `/api/settings` | Yes | `settings.controller.getUserSettings` | None | `{ success: true, data: UserSettings }` |
 | `PUT` | `/api/settings` | Yes | `settings.controller.updateUserSettings` | `{ profile, career, learning, aiPreferences, notifications }` | `{ success: true, data: UserSettings }` |
@@ -1146,15 +1237,17 @@ node -r ts-node/register --test `
   src/services/resumeStructuredExtractor.service.test.ts `
   src/services/skillExtractor.service.test.ts `
   src/services/skillGraph.service.test.ts `
-  src/services/adaptiveInterview.service.test.ts
+  src/services/adaptiveInterview.service.test.ts `
+  src/services/githubEvidence.service.test.ts
 ```
 
 ### 16.2 Actual Verification Results
-- **Total Tests Executed:** 163 tests
-- **Passing Tests:** 163
+- **Total Tests Executed:** 183 tests
+- **Passing Tests:** 183
 - **Failing Tests:** 0
-- **Execution Duration:** ~2.8 seconds
+- **Execution Duration:** ~3.2 seconds
 - **Breakdown by Test File:**
+  - `githubEvidence.service.test.ts`: 20 tests passed (canonical URL normalization with trailing slash/.git strip, rejection of non-GitHub domains, SSRF protection rejecting localhost and link-local 169.254.169.254, SSRF protection rejecting private IPv4 ranges, rejection of embedded auth credentials in URLs, deterministic package.json manifest parsing, requirements.txt parsing with comment/specifier strip, go.mod module dependency parsing, observed source import extraction from JS/TS and Python, distinction between declared dependencies and observed imports, architectural signal detection for API routes/models/auth/tests/CI-CD/Docker, `supported` status for active source imports and models, `partially_supported` status for manifest-only or doc-only claims, `not_found` status for absent technologies without false accusations, `unable_to_assess` status when tree or file content is empty/inaccessible, interview question grounding in real observed files and architectural choices, interview question motivation references without fabrication, prompt injection sanitization against instruction overrides, file provenance and snippet attribution, empty tree graceful fallback).
   - `adaptiveInterview.service.test.ts`: 18 tests passed (strong answers step-up difficulty, partially correct answers trigger targeted clarification follow-up, weak answers trigger foundational check, required unassessed skills prioritized, assessed skills deprioritized, follow-up incorporates gap/parent question, distinct questions and normalized skill names, question and follow-up budget enforcement, completion report aggregation, empty answers score 0 without fabrication, bounded rubric scores 0-100, 5-dimension rubric weights formula, final report distinguishes assessed from untested skills, historical comparison calculates score deltas, question bank covers all tiers, empty responses edge case handled, duplicate skill aliases normalized, unknown skill fallback).
   - `skillGraph.service.test.ts`: 18 tests passed (valid DAG construction with 0 cycles across curated graph, 2-node cycle detection, multi-node cycle detection, topological ordering with prerequisites before dependents, multi-prerequisite resolution, shared prerequisite deduplication, retention of unmet prerequisites absent from JD, exclusion of candidate-demonstrated skills, alias normalization, required vs preferred prioritization, deterministic tie-breaking, empty target lists, unknown skill definitions, cyclic definition rejection, deterministic educational fallback, roadmap 4-phase assignment, completion percentage calculation, and downstream unlock mapping).
   - `jobMatch.service.test.ts`: 51 tests passed (covering formulas, weights, priority inheritance, ambiguous skills, realistic JDs, and 12 dedicated explainability scenarios: score breakdowns, prioritized missing skills, classification reasons, resume evidence extraction, duplicate collapse, and zero inflation).
@@ -1223,6 +1316,20 @@ flowchart LR
     E -->|Budget Exhausted| I[Synthesize Final Performance Report]
 ```
 
+### 17.5 GitHub Project Evidence Verification Pipeline
+```mermaid
+flowchart LR
+    A[Submit GitHub URL & Project Claims] --> B[Validate & Normalize URL: SSRF Defense]
+    B --> C[Fetch Metadata & Safe Git Tree: Max 300 Files]
+    C --> D[Selectively Fetch Manifests, Docs & Source: Max 50 KB]
+    D --> E[Parse Manifests & Extract Observed Imports]
+    E --> F[Detect 6 Architectural Signals]
+    F --> G[Evaluate Claims across 4 Evidence Statuses]
+    G --> H[Synthesize Grounded Technical Interview Questions]
+    H --> I[Persist ProjectEvidence in MongoDB]
+    I --> J[Render Interactive Verification Cards & Grounded Interview Option]
+```
+
 ---
 
 ## 18. Implementation Status and Gaps
@@ -1235,10 +1342,11 @@ flowchart LR
 - Directed skill dependency graph with 3-color DFS cycle validation and Kahn's topological sort (Phase 2).
 - Intelligent, personalized learning roadmap generation with practical exercises, deliverables, and interactive step completion tracking (Phase 2).
 - Adaptive AI interview engine with 5-dimension rubric, dynamic difficulty tuning, gap follow-ups, and session recovery (Phase 3).
+- GitHub project evidence verification pipeline with SSRF defenses, manifest parsing, import extraction, architectural signal detection, 4-status claim verification rubric, and grounded adaptive interview questions (Phase 4).
 - Per-project strength and relevance analyzers.
 - Multi-model Gemini integration with rule-based and curated template fallbacks.
 - Authenticated JWT user management and MongoDB data lifecycle.
-- Clean Vite/React frontend dashboard with interactive charts, dual-view roadmap, adaptive mock interview workbench, and tabs.
+- Clean Vite/React frontend dashboard with interactive charts, dual-view roadmap, adaptive mock interview workbench, and GitHub evidence verification cards.
 
 ### 18.2 Discovered Gaps & Differences from Documentation
 1. **Database Mismatch in README:** The root `README.md` lists PostgreSQL and Prisma ORM. The real implementation is built on MongoDB with Mongoose.
@@ -1251,7 +1359,7 @@ flowchart LR
 ## 19. Source File Reference Index
 
 ### 19.1 Backend Core Files
-- [app.ts](file:///d:/coding/careerAI/backend/src/app.ts): Express server setup, middleware stack, CORS, upload error handlers.
+- [app.ts](file:///d:/coding/careerAI/backend/src/app.ts): Express server setup, middleware stack, CORS, upload error handlers, mounted routes (`/api/project-evidence`).
 - [server.ts](file:///d:/coding/careerAI/backend/src/server.ts): MongoDB connection initialization and HTTP listener.
 - [database.ts](file:///d:/coding/careerAI/backend/src/config/database.ts): Mongoose connection logic.
 - [cloudinary.ts](file:///d:/coding/careerAI/backend/src/config/cloudinary.ts): Cloudinary raw uploader with local disk fallback.
@@ -1263,7 +1371,8 @@ flowchart LR
 - [skillExtractor.service.ts](file:///d:/coding/careerAI/backend/src/services/skillExtractor.service.ts): Taxonomy regex matcher, contextual disambiguator, and ranking engine.
 - [skillGraph.service.ts](file:///d:/coding/careerAI/backend/src/services/skillGraph.service.ts): Directed acyclic graph validator (3-color DFS), transitive dependency expander, and Kahn's topological sorter.
 - [roadmap.service.ts](file:///d:/coding/careerAI/backend/src/services/roadmap.service.ts): Personalized learning roadmap synthesizer with phased curriculum and deterministic educational templates.
-- [adaptiveInterview.service.ts](file:///d:/coding/careerAI/backend/src/services/adaptiveInterview.service.ts): Adaptive AI interview state machine, 5-dimension rubric evaluator, topic prioritization, and performance report generator.
+- [adaptiveInterview.service.ts](file:///d:/coding/careerAI/backend/src/services/adaptiveInterview.service.ts): Adaptive AI interview state machine, 5-dimension rubric evaluator, topic prioritization, grounded project context support, and performance report generator.
+- [githubEvidence.service.ts](file:///d:/coding/careerAI/backend/src/services/githubEvidence.service.ts): GitHub API client, SSRF URL validator, manifest parsers, import extractor, architectural detector, 4-status claim verification rubric, prompt-injection sanitization, and grounded interview question synthesizer.
 - [resumeStructuredExtractor.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeStructuredExtractor.service.ts): Cohesive education, experience, and project entity extractor.
 - [resumeScoring.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeScoring.service.ts): 6-component deterministic resume scoring engine.
 - [resumeParser.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeParser.service.ts): Legacy unified ATS score calculator and section checklist generator.
@@ -1279,7 +1388,8 @@ flowchart LR
 - [resume.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/resume.controller.ts) / [Resume.ts](file:///d:/coding/careerAI/backend/src/models/Resume.ts): Resume upload, parsing, and retrieval.
 - [jobMatch.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/jobMatch.controller.ts): Job match endpoint.
 - [roadmap.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/roadmap.controller.ts) / [Roadmap.ts](file:///d:/coding/careerAI/backend/src/models/Roadmap.ts): Learning roadmap generation, retrieval, step updates, and model.
-- [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts) / [InterviewSession.ts](file:///d:/coding/careerAI/backend/src/models/InterviewSession.ts): Adaptive AI mock interview sessions, dynamic adaptation, and models.
+- [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts) / [InterviewSession.ts](file:///d:/coding/careerAI/backend/src/models/InterviewSession.ts): Adaptive AI mock interview sessions, dynamic adaptation, grounded project evidence integration, and models.
+- [projectEvidence.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/projectEvidence.controller.ts) / [ProjectEvidence.ts](file:///d:/coding/careerAI/backend/src/models/ProjectEvidence.ts) / [projectEvidence.routes.ts](file:///d:/coding/careerAI/backend/src/routes/projectEvidence.routes.ts): GitHub repository analysis, claim verification, persistence, and endpoints.
 - [analysis.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/analysis.controller.ts) / [Analysis.ts](file:///d:/coding/careerAI/backend/src/models/Analysis.ts): AI resume analysis and section rewriting.
 - [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts) / [Progress.ts](file:///d:/coding/careerAI/backend/src/models/Progress.ts): Learning journey, roadmap completion aggregation, and timeline.
 - [dashboard.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/dashboard.controller.ts): Dashboard stats aggregated with live interview metrics.
@@ -1289,10 +1399,12 @@ flowchart LR
 - [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx): Application route definitions.
 - [api.ts](file:///d:/coding/careerAI/frontend/src/services/api.ts): Axios interceptor configuration with JWT injection.
 - [jobs.service.ts](file:///d:/coding/careerAI/frontend/src/features/jobs/jobs.service.ts): Job matching, roadmap generation, and step status update API client.
-- [interview.service.ts](file:///d:/coding/careerAI/frontend/src/features/interview/interview.service.ts): Adaptive interview session management, answer evaluation, and recovery API client.
-- [ResumePage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Resume/ResumePage.tsx): Active resume viewer, ATS insight tabs, Explainable Job Match UI, Dual-View Learning Roadmap, and Interactive SVG Skill Dependency Graph.
-- [InterviewPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Interview/InterviewPage.tsx): Adaptive AI mock interview workbench with 5-dimension rubric breakdown, difficulty indicators, follow-up callouts, and performance report.
+- [interview.service.ts](file:///d:/coding/careerAI/frontend/src/features/interview/interview.service.ts): Adaptive interview session management, grounded project context support, answer evaluation, and recovery API client.
+- [projectEvidence.service.ts](file:///d:/coding/careerAI/frontend/src/features/projectEvidence/projectEvidence.service.ts): GitHub repository evidence verification API client and TypeScript types.
+- [ResumePage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Resume/ResumePage.tsx): Active resume viewer, ATS insight tabs, Explainable Job Match UI, Dual-View Learning Roadmap, and Interactive GitHub Repository Evidence Verification Cards with Grounded Interview launch.
+- [InterviewPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Interview/InterviewPage.tsx): Adaptive AI mock interview workbench with 5-dimension rubric breakdown, difficulty indicators, follow-up callouts, performance report, and Project Evidence grounding banner.
 - [AnalysisPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Analysis/AnalysisPage.tsx): Quality score cards, section rewrites, and skill gap roadmaps.
 - [DashboardPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Dashboard/DashboardPage.tsx): High-level career readiness metric cards.
 - [ProgressPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Progress/ProgressPage.tsx): Visual progress tracking and achievement badges.
 - [SettingsPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Settings/SettingsPage.tsx): Career profile and preferences forms.
+

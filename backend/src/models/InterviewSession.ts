@@ -48,6 +48,13 @@ export interface IInterviewSession extends Document {
   currentQuestionIndex?: number;
   nextAction?: string;
   nextActionReason?: string;
+  projectEvidenceId?: mongoose.Types.ObjectId;
+  projectContext?: {
+    projectTitle: string;
+    repositoryUrl: string;
+    findingsSummary?: string;
+    primaryTechnologies?: string[];
+  };
   questions: Array<{
     questionId: string;
     text: string;
@@ -58,6 +65,8 @@ export interface IInterviewSession extends Document {
     parentQuestionId?: string;
     followupReason?: string;
     resumeReference?: string;
+    repositoryFinding?: string;
+    fileReference?: string;
   }>;
   responses: IInterviewResponse[];
   overallScore: number;
@@ -123,6 +132,16 @@ const interviewSessionSchema = new Schema<IInterviewSession>(
     currentQuestionIndex: { type: Number, default: 0 },
     nextAction: { type: String, default: "next_skill" },
     nextActionReason: { type: String, default: "" },
+    projectEvidenceId: {
+      type: Schema.Types.ObjectId,
+      ref: "ProjectEvidence",
+    },
+    projectContext: {
+      projectTitle: { type: String, default: "" },
+      repositoryUrl: { type: String, default: "" },
+      findingsSummary: { type: String, default: "" },
+      primaryTechnologies: [{ type: String }],
+    },
     questions: [
       {
         questionId: String,
@@ -134,6 +153,8 @@ const interviewSessionSchema = new Schema<IInterviewSession>(
         parentQuestionId: String,
         followupReason: String,
         resumeReference: String,
+        repositoryFinding: String,
+        fileReference: String,
       },
     ],
     responses: [

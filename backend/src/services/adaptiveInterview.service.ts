@@ -66,6 +66,8 @@ export interface AdaptiveQuestion {
   parentQuestionId?: string;
   followupReason?: string;
   resumeReference?: string;
+  repositoryFinding?: string;
+  fileReference?: string;
 }
 
 export interface PrioritizedTopic {
@@ -703,6 +705,13 @@ export async function generateAdaptiveQuestion(params: {
   identifiedGaps?: string[];
   followupReason?: string;
   questionIndex: number;
+  projectContext?: {
+    projectTitle: string;
+    repositoryUrl: string;
+    findingsSummary?: string;
+    fileReference?: string;
+    primaryTechnologies?: string[];
+  };
 }): Promise<AdaptiveQuestion> {
   const qId = `q${params.questionIndex + 1}_${Date.now().toString(36)}`;
 
@@ -766,10 +775,39 @@ Return ONLY a single valid JSON object without Markdown backticks:
     };
   }
 
-  // New Question Generation (AI)
-  if (ai) {
-    try {
-      const prompt = `You are a Senior Engineering Hiring Manager at ${params.targetCompany || "Google"}.
+    // Project-grounded Question (Grounded in verified repository evidence)
+    if (params.projectContext && !params.isFollowup) {
+      const repoName = params.projectContext.repositoryUrl.split("/").pop() || "project repository";
+      const fileRef = params.projectContext.fileReference;
+      const finding = params.projectContext.findingsSummary || `implementation of ${params.targetSkill}`;
+
+      let questionText = `In your project "${params.projectContext.projectTitle}" (${repoName}), you worked with ${params.targetSkill}. Based on the repository's ${finding}${
+        fileRef ? ` in "${fileRef}"` : ""
+      }, how did you structure your components and handle asynchronous error boundaries in production?`;
+
+      if (params.difficulty === "Hard") {
+        questionText = `In "${repoName}" (${params.projectContext.projectTitle}), how did you optimize the performance and scalability of your ${params.targetSkill} implementation${
+          fileRef ? ` (observed in "${fileRef}")` : ""
+        }? What were the key architectural trade-offs you evaluated?`;
+      }
+
+      return {
+        questionId: qId,
+        text: questionText,
+        category: "Technical Project Defense",
+        skill: params.targetSkill,
+        difficulty: params.difficulty,
+        isFollowup: false,
+        repositoryFinding: finding,
+        fileReference: fileRef,
+        resumeReference: `${params.projectContext.projectTitle} (${repoName})`,
+      };
+    }
+
+    // New Question Generation (AI)
+    if (ai) {
+      try {
+        const prompt = `You are a Senior Engineering Hiring Manager at ${params.targetCompany || "Google"}.
 Generate a realistic, specific, non-generic technical interview question assessing "${params.targetSkill}" for a "${params.targetRole}" position.
 
 SPECIFICATIONS:
@@ -784,25 +822,25 @@ Return ONLY a single valid JSON object without Markdown backticks:
   "difficulty": "${params.difficulty}"
 }`;
 
-      const aiText = await callGeminiWithFallback(prompt);
-      if (aiText) {
-        const cleaned = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleaned);
-        if (parsed.text) {
-          return {
-            questionId: qId,
-            text: parsed.text,
-            category: parsed.category || "Technical Interview",
-            skill: params.targetSkill,
-            difficulty: params.difficulty,
-            isFollowup: false,
-          };
+        const aiText = await callGeminiWithFallback(prompt);
+        if (aiText) {
+          const cleaned = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
+          const parsed = JSON.parse(cleaned);
+          if (parsed.text) {
+            return {
+              questionId: qId,
+              text: parsed.text,
+              category: parsed.category || "Technical Interview",
+              skill: params.targetSkill,
+              difficulty: params.difficulty,
+              isFollowup: false,
+            };
+          }
         }
+      } catch (err) {
+        console.error("AI Question generation error:", err);
       }
-    } catch (err) {
-      console.error("AI Question generation error:", err);
     }
-  }
 
   // Deterministic New Question Fallback
   const fallbackText = getFallbackQuestionForSkill(params.targetSkill, params.difficulty, params.targetRole);

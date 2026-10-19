@@ -3,6 +3,7 @@ import Resume from "../models/Resume";
 import Analysis from "../models/Analysis";
 import InterviewSession, { IAssessedSkillSummary, IInterviewResponse } from "../models/InterviewSession";
 import Roadmap from "../models/Roadmap";
+import ProjectEvidence from "../models/ProjectEvidence";
 import { parseJobDescription } from "../services/jobDescription.service";
 import {
   prioritizeInterviewTopics,
@@ -40,21 +41,54 @@ async function generateWithFallback(prompt: string): Promise<string> {
  */
 export const startInterviewSession = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { mode, difficulty, length, targetCompany, targetRole, jobDescription, isAdaptive } = req.body;
+    const { mode, difficulty, length, targetCompany, targetRole, jobDescription, isAdaptive, projectEvidenceId } = req.body;
 
     const resume = await Resume.findOne({ user: req.userId }).sort({ updatedAt: -1 });
     const analysis = await Analysis.findOne({ user: req.userId }).sort({ updatedAt: -1 });
     const roadmap = await Roadmap.findOne({ user: req.userId }).sort({ updatedAt: -1 });
+
+    let projectContextData:
+      | {
+          projectTitle: string;
+          repositoryUrl: string;
+          findingsSummary?: string;
+          fileReference?: string;
+          primaryTechnologies?: string[];
+        }
+      | undefined = undefined;
+
+    let projectVerifiedSkills: string[] = [];
+
+    if (projectEvidenceId) {
+      const pe = await ProjectEvidence.findOne({ _id: projectEvidenceId, user: req.userId });
+      if (pe) {
+        projectContextData = {
+          projectTitle: pe.projectTitle,
+          repositoryUrl: pe.repositoryUrl,
+          findingsSummary: pe.summary.observedStrengths.join("; ") || `Verified repository code (${pe.repo})`,
+          fileReference: pe.filesScanned[0]?.path,
+          primaryTechnologies: pe.summary.primaryTechnologies,
+        };
+        projectVerifiedSkills = pe.claimAssessments
+          .filter((c) => c.status === "supported" || c.status === "partially_supported")
+          .map((c) => c.skill);
+      }
+    }
 
     const isAdaptiveMode =
       Boolean(isAdaptive) ||
       difficulty === "Adaptive AI" ||
       (typeof mode === "string" && mode.toLowerCase().includes("adaptive"));
 
-    const userSkills =
-      resume?.extractedSkills?.map((s) => s.name) ||
-      resume?.parsedData?.skills ||
-      ["JavaScript", "TypeScript", "React", "Node.js"];
+    const userSkills = [
+      ...projectVerifiedSkills,
+      ...(resume?.extractedSkills?.map((s) => s.name) || []),
+      ...(resume?.parsedData?.skills || []),
+      "JavaScript",
+      "TypeScript",
+      "React",
+      "Node.js",
+    ];
     const userSummary = resume?.parsedData?.summary || "";
     const userProjects = resume?.parsedData?.projects || [];
     const userExperience = resume?.parsedData?.experience || [];
@@ -102,17 +136,20 @@ export const startInterviewSession = async (req: Request, res: Response): Promis
         difficulty: startingDifficulty,
         isFollowup: false,
         questionIndex: 0,
+        projectContext: projectContextData,
       });
 
       const session = await InterviewSession.create({
         user: req.userId,
-        mode: mode || "Adaptive Technical Interview",
+        mode: mode || (projectContextData ? "Project-Grounded Technical Interview" : "Adaptive Technical Interview"),
         difficulty: difficulty || "Adaptive AI",
         length: length || 5,
         targetCompany: effectiveCompany,
         targetRole: effectiveRole,
         isAdaptive: true,
         jobDescription: activeJdText,
+        projectEvidenceId: projectEvidenceId || undefined,
+        projectContext: projectContextData,
         targetSkills: prioritizedSkills,
         unassessedSkills: prioritizedSkills.filter((s) => s !== initialSkill),
         assessedSkills: [],
@@ -121,7 +158,9 @@ export const startInterviewSession = async (req: Request, res: Response): Promis
         maxFollowupDepth: 2,
         currentQuestionIndex: 0,
         nextAction: "next_skill",
-        nextActionReason: `Initial diagnostic question selected for highest-priority target skill: ${initialSkill}.`,
+        nextActionReason: projectContextData
+          ? `Grounded initial question on repository evidence for ${projectContextData.projectTitle} (${initialSkill}).`
+          : `Initial diagnostic question selected for highest-priority target skill: ${initialSkill}.`,
         questions: [firstQuestion],
         responses: [],
         overallScore: 0,
@@ -396,6 +435,7 @@ export const submitQuestionAnswer = async (req: Request, res: Response): Promise
         identifiedGaps: evaluation.gaps,
         followupReason: decision.reason,
         questionIndex: session.questions.length,
+        projectContext: session.projectContext,
       });
 
       session.questions.push(nextQ);

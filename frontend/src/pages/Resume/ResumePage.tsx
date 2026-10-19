@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   FileText,
   Sparkles,
@@ -29,6 +30,10 @@ import {
   GitBranch,
   Compass,
   BookOpen,
+  Code2,
+  ShieldCheck,
+  Boxes,
+  Cpu,
 } from "lucide-react";
 
 import ResumeUploadCard, { formatFileSize } from "../../components/resume/ResumeUploadCard";
@@ -42,6 +47,11 @@ import {
   type ProjectJobRelevance,
   type PersonalizedRoadmap,
 } from "../../features/jobs/jobs.service";
+import {
+  analyzeProjectEvidenceApi,
+  getAllUserProjectEvidenceApi,
+  type ProjectEvidenceData,
+} from "../../features/projectEvidence/projectEvidence.service";
 import type { ResumeData } from "../../types/resume";
 import axios from "axios";
 
@@ -71,6 +81,30 @@ function ResumePage() {
   const [selectedPhaseFilter, setSelectedPhaseFilter] = useState<number | "all">("all");
   const [updatingStepSkill, setUpdatingStepSkill] = useState<string | null>(null);
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
+
+  const navigate = useNavigate();
+
+  // Phase 4 GitHub Project Evidence State
+  const [projectEvidenceMap, setProjectEvidenceMap] = useState<Record<string, ProjectEvidenceData>>({});
+  const [projectUrlInputs, setProjectUrlInputs] = useState<Record<string, string>>({});
+  const [verifyingProjectTitle, setVerifyingProjectTitle] = useState<string | null>(null);
+  const [verificationErrors, setVerificationErrors] = useState<Record<string, string>>({});
+  const [expandedEvidence, setExpandedEvidence] = useState<Record<string, boolean>>({});
+
+  const fetchProjectEvidence = async () => {
+    try {
+      const res = await getAllUserProjectEvidenceApi();
+      if (res.success && res.data) {
+        const map: Record<string, ProjectEvidenceData> = {};
+        for (const item of res.data) {
+          map[item.projectTitle.toLowerCase().trim()] = item;
+        }
+        setProjectEvidenceMap(map);
+      }
+    } catch (err) {
+      console.error("Failed to fetch project evidence records:", err);
+    }
+  };
 
   const fetchResume = async () => {
     try {
@@ -103,7 +137,54 @@ function ResumePage() {
       }
     };
     fetchActiveRoadmap();
+    fetchProjectEvidence();
   }, []);
+
+  const handleVerifyProjectEvidence = async (projectTitle: string, claimedSkills: string[]) => {
+    const url = projectUrlInputs[projectTitle]?.trim();
+    if (!url) {
+      setVerificationErrors((prev) => ({
+        ...prev,
+        [projectTitle]: "Please enter a valid GitHub repository URL (e.g. https://github.com/owner/repo).",
+      }));
+      return;
+    }
+
+    try {
+      setVerifyingProjectTitle(projectTitle);
+      setVerificationErrors((prev) => ({ ...prev, [projectTitle]: "" }));
+
+      const res = await analyzeProjectEvidenceApi({
+        projectTitle,
+        repositoryUrl: url,
+        resumeId: resume?._id,
+        claimedSkills,
+      });
+
+      if (res.success && res.data) {
+        setProjectEvidenceMap((prev) => ({
+          ...prev,
+          [projectTitle.toLowerCase().trim()]: res.data,
+        }));
+        setExpandedEvidence((prev) => ({ ...prev, [projectTitle]: true }));
+      }
+    } catch (err: any) {
+      console.error("Project evidence verification error:", err);
+      const msg = err.response?.data?.message || err.message || "Failed to verify repository evidence.";
+      setVerificationErrors((prev) => ({ ...prev, [projectTitle]: msg }));
+    } finally {
+      setVerifyingProjectTitle(null);
+    }
+  };
+
+  const handleStartProjectInterview = (evidence: ProjectEvidenceData) => {
+    navigate("/interview", {
+      state: {
+        projectEvidenceId: evidence._id,
+        projectTitle: evidence.projectTitle,
+      },
+    });
+  };
 
   const handleUploadSuccess = (newResume: ResumeData) => {
     setResume(newResume);
@@ -763,18 +844,61 @@ function ResumePage() {
             {/* TAB 5: Projects */}
             {activeTab === "projects" && (
               <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-6">
-                <h3 className="text-base font-bold text-gray-900 mb-4">Extracted Projects</h3>
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+                  <div>
+                    <h3 className="text-base font-bold text-gray-900">Extracted Projects & GitHub Evidence</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Verify candidate resume claims against real repository files, detect architectural signals, and launch project-grounded technical interviews.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-purple-50 text-purple-700 border border-purple-200 px-3 py-1 text-xs font-bold flex items-center gap-1.5">
+                    <FolderGit2 size={13} /> Phase 4 Evidence Engine
+                  </span>
+                </div>
+
                 {resume.parsedData?.projects && resume.parsedData.projects.length > 0 ? (
-                  <div className="space-y-4">
+                  <div className="space-y-6">
                     {resume.parsedData.projects.map((proj, idx) => {
-                      const analysis = resume.projectAnalysis?.find(
-                        (a) => a.title === proj.title
+                      const analysis = resume.projectAnalysis?.find((a) => a.title === proj.title);
+                      const normTitle = proj.title.toLowerCase().trim();
+                      const evidence = projectEvidenceMap[normTitle];
+                      const currentInputUrl =
+                        projectUrlInputs[proj.title] !== undefined
+                          ? projectUrlInputs[proj.title]
+                          : proj.links?.find((l) => l.includes("github.com")) || "";
+                      const isVerifying = verifyingProjectTitle === proj.title;
+                      const errorMsg = verificationErrors[proj.title];
+                      const isExpanded = expandedEvidence[proj.title] ?? Boolean(evidence);
+
+                      // Claimed skills: technologies or detected skills
+                      const claimedSkills = Array.from(
+                        new Set([
+                          ...(proj.technologies || []),
+                          ...(analysis?.detectedSkills || []),
+                        ])
                       );
+
                       return (
-                        <div key={idx} className="rounded-xl border border-gray-200 p-5 space-y-3">
+                        <div key={idx} className="rounded-xl border border-gray-200 p-5 space-y-4 bg-white shadow-sm hover:border-gray-300 transition">
                           {/* Project title + strength badge */}
                           <div className="flex items-start justify-between gap-3 flex-wrap">
-                            <h4 className="font-bold text-gray-900 text-base">{proj.title}</h4>
+                            <div>
+                              <h4 className="font-bold text-gray-900 text-base">{proj.title}</h4>
+                              {analysis && analysis.domains.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                  {analysis.domains.map((domain) => (
+                                    <span
+                                      key={domain.name}
+                                      className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 border border-blue-100"
+                                      title={`Confidence: ${Math.round(domain.confidence * 100)}%`}
+                                    >
+                                      {domain.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+
                             {analysis && (
                               <div className="flex items-center gap-2 flex-shrink-0">
                                 <span
@@ -787,44 +911,30 @@ function ResumePage() {
                                   }`}
                                   title={`Impl: ${analysis.strength.implementationEvidence} | Depth: ${analysis.strength.technicalDepth} | Outcomes: ${analysis.strength.measurableOutcomes} | Deploy: ${analysis.strength.deploymentEvidence} | Richness: ${analysis.strength.descriptionRichness}`}
                                 >
-                                  Strength {analysis.strength.overall}/100
+                                  Portfolio Strength {analysis.strength.overall}/100
                                 </span>
                               </div>
                             )}
                           </div>
-
-                          {/* Domain badges */}
-                          {analysis && analysis.domains.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {analysis.domains.map((domain) => (
-                                <span
-                                  key={domain.name}
-                                  className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700 border border-blue-100"
-                                  title={`Confidence: ${Math.round(domain.confidence * 100)}%`}
-                                >
-                                  {domain.name}
-                                </span>
-                              ))}
-                            </div>
-                          )}
 
                           {/* Description */}
                           {proj.description && (
                             <p className="text-xs text-gray-600 leading-relaxed">{proj.description}</p>
                           )}
 
-                          {/* Detected skills from analysis */}
-                          {analysis && analysis.detectedSkills.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 pt-1">
-                              {analysis.detectedSkills.map((skill) => (
-                                <span key={skill} className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700">
+                          {/* Detected skills from resume */}
+                          {claimedSkills.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                              <span className="text-[11px] font-semibold text-gray-400 mr-1">Claimed Tech:</span>
+                              {claimedSkills.map((skill) => (
+                                <span key={skill} className="rounded-md bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 border border-purple-100">
                                   {skill}
                                 </span>
                               ))}
                             </div>
                           )}
 
-                          {/* Links */}
+                          {/* External Links */}
                           {proj.links && proj.links.length > 0 && (
                             <div className="flex flex-wrap gap-2 pt-1">
                               {proj.links.map((link, linkIdx) => (
@@ -833,14 +943,283 @@ function ResumePage() {
                                   href={link}
                                   target="_blank"
                                   rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 border border-blue-100 hover:bg-blue-100 transition"
+                                  className="inline-flex items-center gap-1.5 rounded-lg bg-gray-50 px-2.5 py-1 text-xs font-semibold text-gray-700 border border-gray-200 hover:bg-gray-100 transition"
                                 >
                                   <ExternalLink size={11} />
-                                  {link.replace(/^https?:\/\//, "").slice(0, 45)}{link.length > 50 ? "…" : ""}
+                                  {link.replace(/^https?:\/\//, "").slice(0, 40)}{link.length > 45 ? "…" : ""}
                                 </a>
                               ))}
                             </div>
                           )}
+
+                          {/* ─── GitHub Project Evidence Verification Section ─── */}
+                          <div className="mt-4 pt-4 border-t border-gray-100 rounded-xl bg-gradient-to-br from-slate-50/80 via-white to-purple-50/30 p-4 border space-y-4">
+                            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                              <div className="flex items-center gap-2">
+                                <FolderGit2 className="h-4 w-4 text-purple-600" />
+                                <h5 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+                                  GitHub Repository Evidence Verification
+                                </h5>
+                              </div>
+                              {evidence && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedEvidence((prev) => ({
+                                      ...prev,
+                                      [proj.title]: !isExpanded,
+                                    }))
+                                  }
+                                  className="text-xs font-semibold text-purple-700 hover:text-purple-900 flex items-center gap-1"
+                                >
+                                  {isExpanded ? (
+                                    <>
+                                      <span>Collapse Details</span>
+                                      <ChevronUp size={14} />
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>View Evidence ({evidence.summary.supportedCount}/{evidence.summary.totalClaims} Supported)</span>
+                                      <ChevronDown size={14} />
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+
+                            {/* Repository URL Input & Verification Action */}
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <div className="relative flex-1">
+                                <input
+                                  type="url"
+                                  placeholder="https://github.com/owner/repository"
+                                  value={currentInputUrl}
+                                  onChange={(e) =>
+                                    setProjectUrlInputs((prev) => ({
+                                      ...prev,
+                                      [proj.title]: e.target.value,
+                                    }))
+                                  }
+                                  className="w-full rounded-xl border border-gray-300 px-3.5 py-2 text-xs focus:border-purple-500 focus:outline-none"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                disabled={isVerifying}
+                                onClick={() => handleVerifyProjectEvidence(proj.title, claimedSkills)}
+                                className="flex items-center justify-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-purple-700 disabled:opacity-60 transition shrink-0"
+                              >
+                                {isVerifying ? (
+                                  <>
+                                    <Loader2 size={13} className="animate-spin" />
+                                    <span>Scanning Code Evidence...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <ShieldCheck size={14} />
+                                    <span>{evidence ? "Re-verify Evidence" : "Verify Repository Evidence"}</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {errorMsg && (
+                              <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200 flex items-center gap-2">
+                                <AlertTriangle size={14} className="shrink-0" />
+                                <span>{errorMsg}</span>
+                              </div>
+                            )}
+
+                            {/* Verified Evidence Details Panel */}
+                            {evidence && isExpanded && (
+                              <div className="space-y-4 pt-2 animate-fadeIn">
+                                {/* Repo Overview Banner */}
+                                <div className="rounded-xl border border-purple-100 bg-white p-3.5 shadow-sm space-y-2">
+                                  <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-bold text-xs text-gray-900">{evidence.owner}/{evidence.repo}</span>
+                                      <a
+                                        href={evidence.repositoryUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-xs text-purple-600 hover:underline inline-flex items-center gap-1"
+                                      >
+                                        <ExternalLink size={10} /> View Repo
+                                      </a>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-[11px] text-gray-500">
+                                      <span>★ {evidence.metadata.stars} stars</span>
+                                      <span>•</span>
+                                      <span>⑂ {evidence.metadata.forks} forks</span>
+                                      <span>•</span>
+                                      <span>Branch: {evidence.defaultBranch}</span>
+                                      <span>•</span>
+                                      <span>License: {evidence.metadata.license}</span>
+                                    </div>
+                                  </div>
+
+                                  {evidence.metadata.description && (
+                                    <p className="text-xs text-gray-600 italic">"{evidence.metadata.description}"</p>
+                                  )}
+
+                                  {/* Languages Bar */}
+                                  {evidence.metadata.languages && Object.keys(evidence.metadata.languages).length > 0 && (
+                                    <div className="space-y-1 pt-1">
+                                      <div className="flex justify-between text-[10px] font-semibold text-gray-500">
+                                        <span>Detected Languages</span>
+                                        <span>{Object.keys(evidence.metadata.languages).join(", ")}</span>
+                                      </div>
+                                      <div className="h-2 w-full rounded-full bg-gray-100 overflow-hidden flex">
+                                        {Object.entries(evidence.metadata.languages).map(([lang, bytes], lIdx) => {
+                                          const totalBytes = Object.values(evidence.metadata.languages).reduce((a, b) => a + b, 0);
+                                          const pct = Math.max(5, Math.round((bytes / totalBytes) * 100));
+                                          const colors = ["bg-purple-500", "bg-blue-500", "bg-emerald-500", "bg-amber-500", "bg-rose-500"];
+                                          return (
+                                            <div
+                                              key={lang}
+                                              className={`${colors[lIdx % colors.length]}`}
+                                              style={{ width: `${pct}%` }}
+                                              title={`${lang}: ${pct}%`}
+                                            />
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Architectural Signals */}
+                                <div className="space-y-2">
+                                  <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                    Architectural Implementation Signals
+                                  </span>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                    <div className={`rounded-lg border p-2 text-xs flex items-center gap-2 ${evidence.architecturalSignals.hasApiRoutes ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
+                                      <Code2 size={13} />
+                                      <span className="font-semibold">API Routes</span>
+                                      <span className="ml-auto text-[10px]">{evidence.architecturalSignals.hasApiRoutes ? "Verified" : "Not Found"}</span>
+                                    </div>
+
+                                    <div className={`rounded-lg border p-2 text-xs flex items-center gap-2 ${evidence.architecturalSignals.hasDatabaseModels ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
+                                      <Boxes size={13} />
+                                      <span className="font-semibold">Database Models</span>
+                                      <span className="ml-auto text-[10px]">{evidence.architecturalSignals.hasDatabaseModels ? "Verified" : "Not Found"}</span>
+                                    </div>
+
+                                    <div className={`rounded-lg border p-2 text-xs flex items-center gap-2 ${evidence.architecturalSignals.hasAuthentication ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
+                                      <ShieldCheck size={13} />
+                                      <span className="font-semibold">Authentication</span>
+                                      <span className="ml-auto text-[10px]">{evidence.architecturalSignals.hasAuthentication ? "Verified" : "Not Found"}</span>
+                                    </div>
+
+                                    <div className={`rounded-lg border p-2 text-xs flex items-center gap-2 ${evidence.architecturalSignals.hasTests ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
+                                      <CheckCircle2 size={13} />
+                                      <span className="font-semibold">Test Suite</span>
+                                      <span className="ml-auto text-[10px]">{evidence.architecturalSignals.hasTests ? "Verified" : "Not Found"}</span>
+                                    </div>
+
+                                    <div className={`rounded-lg border p-2 text-xs flex items-center gap-2 ${evidence.architecturalSignals.hasCiCd ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
+                                      <GitBranch size={13} />
+                                      <span className="font-semibold">CI/CD Pipeline</span>
+                                      <span className="ml-auto text-[10px]">{evidence.architecturalSignals.hasCiCd ? "Verified" : "Not Found"}</span>
+                                    </div>
+
+                                    <div className={`rounded-lg border p-2 text-xs flex items-center gap-2 ${evidence.architecturalSignals.hasDocker ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-gray-50 border-gray-200 text-gray-500"}`}>
+                                      <Cpu size={13} />
+                                      <span className="font-semibold">Containerized</span>
+                                      <span className="ml-auto text-[10px]">{evidence.architecturalSignals.hasDocker ? "Verified" : "Not Found"}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Claim Assessments */}
+                                <div className="space-y-2">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[11px] font-bold text-gray-500 uppercase tracking-wider">
+                                      Resume Claim Verification ({evidence.summary.supportedCount} Supported • {evidence.summary.partiallySupportedCount} Partial • {evidence.summary.notFoundCount} Not Found)
+                                    </span>
+                                  </div>
+
+                                  <div className="grid gap-2.5">
+                                    {evidence.claimAssessments.map((claim, cIdx) => {
+                                      const badgeColors = {
+                                        supported: "bg-emerald-50 text-emerald-800 border-emerald-200",
+                                        partially_supported: "bg-amber-50 text-amber-800 border-amber-200",
+                                        not_found: "bg-gray-50 text-gray-600 border-gray-200",
+                                        unable_to_assess: "bg-rose-50 text-rose-700 border-rose-200",
+                                      }[claim.status];
+
+                                      const statusLabels = {
+                                        supported: "Supported by repository evidence",
+                                        partially_supported: "Partially supported (manifest/docs)",
+                                        not_found: "Not found in scanned files",
+                                        unable_to_assess: "Unable to assess",
+                                      }[claim.status];
+
+                                      return (
+                                        <div key={cIdx} className="rounded-xl border border-gray-200 bg-white p-3 space-y-1.5 shadow-sm text-xs">
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex items-center gap-2">
+                                              <span className="font-bold text-gray-900">{claim.skill}</span>
+                                              <span className="text-[10px] font-mono bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded border border-purple-100">
+                                                {claim.evidenceType.replace("_", " ")}
+                                              </span>
+                                            </div>
+                                            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${badgeColors}`}>
+                                              {statusLabels}
+                                            </span>
+                                          </div>
+
+                                          <p className="text-gray-600 text-[11px] leading-relaxed">{claim.explanation}</p>
+
+                                          {claim.fileReferences && claim.fileReferences.length > 0 && (
+                                            <div className="flex flex-wrap gap-1.5 pt-1">
+                                              {claim.fileReferences.map((ref, rIdx) => (
+                                                <span key={rIdx} className="rounded bg-gray-100 px-2 py-0.5 text-[10px] font-mono text-gray-700 border border-gray-200">
+                                                  {ref.path} {ref.snippet ? `• ${ref.snippet}` : ""}
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                          {claim.limitations && (
+                                            <p className="text-[10px] text-gray-400 italic pt-0.5">Note: {claim.limitations}</p>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                {/* Project-Grounded Technical Interview Action */}
+                                <div className="rounded-xl bg-purple-50/80 p-3.5 border border-purple-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                                  <div className="space-y-0.5">
+                                    <h6 className="text-xs font-bold text-purple-950 flex items-center gap-1.5">
+                                      <Sparkles size={13} className="text-purple-600" />
+                                      Ready for Technical Project Defense
+                                    </h6>
+                                    <p className="text-[11px] text-purple-800">
+                                      Conduct an adaptive technical interview asking questions grounded in your actual {evidence.owner}/{evidence.repo} files and architecture.
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartProjectInterview(evidence)}
+                                    className="flex items-center justify-center gap-1.5 rounded-xl bg-purple-700 px-4 py-2 text-xs font-bold text-white shadow hover:bg-purple-800 transition shrink-0"
+                                  >
+                                    <span>Start Grounded Interview</span>
+                                    <ArrowRight size={13} />
+                                  </button>
+                                </div>
+
+                                {/* Mandatory Ethical Limitations Disclaimer */}
+                                <div className="rounded-lg bg-gray-50 p-2.5 text-[11px] text-gray-500 border border-gray-200 flex items-start gap-2">
+                                  <Info size={13} className="mt-0.5 shrink-0 text-gray-400" />
+                                  <span>{evidence.summary.limitationsDisclaimer}</span>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

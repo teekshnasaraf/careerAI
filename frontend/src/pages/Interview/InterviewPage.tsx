@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   CheckCircle2,
   Award,
@@ -15,6 +16,8 @@ import {
   Info,
   ChevronDown,
   ChevronUp,
+  FolderGit2,
+  ExternalLink,
 } from "lucide-react";
 
 import {
@@ -30,6 +33,10 @@ import type {
   EvaluationEntry,
   QuestionEntry,
 } from "../../features/interview/interview.service";
+import {
+  getAllUserProjectEvidenceApi,
+  type ProjectEvidenceData,
+} from "../../features/projectEvidence/projectEvidence.service";
 
 const MODES = [
   "Adaptive AI Technical Interview",
@@ -63,6 +70,7 @@ const ROLES = [
 ];
 
 function InterviewPage() {
+  const location = useLocation();
   const [stats, setStats] = useState<InterviewStatsData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -74,6 +82,8 @@ function InterviewPage() {
   const [selectedRole, setSelectedRole] = useState("Full Stack Engineer");
   const [jobDescriptionInput, setJobDescriptionInput] = useState("");
   const [startingSession, setStartingSession] = useState(false);
+  const [userProjects, setUserProjects] = useState<ProjectEvidenceData[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
 
   // Active Session State
   const [activeSession, setActiveSession] = useState<InterviewSessionData | null>(null);
@@ -87,9 +97,10 @@ function InterviewPage() {
   const fetchStatsAndActive = async () => {
     try {
       setLoading(true);
-      const [statsRes, activeRes] = await Promise.all([
+      const [statsRes, activeRes, projectsRes] = await Promise.all([
         getInterviewStatsApi(),
         getActiveInterviewSessionApi(),
+        getAllUserProjectEvidenceApi().catch(() => ({ success: false, data: [] })),
       ]);
 
       if (statsRes.success && statsRes.data) {
@@ -97,6 +108,9 @@ function InterviewPage() {
       }
       if (activeRes.success && activeRes.data) {
         setActiveResumeBanner(activeRes.data);
+      }
+      if (projectsRes.success && projectsRes.data) {
+        setUserProjects(projectsRes.data);
       }
     } catch (err) {
       console.error("Failed to fetch interview stats:", err);
@@ -107,7 +121,10 @@ function InterviewPage() {
 
   useEffect(() => {
     fetchStatsAndActive();
-  }, []);
+    if (location.state && (location.state as any).projectEvidenceId) {
+      setSelectedProjectId((location.state as any).projectEvidenceId);
+    }
+  }, [location.state]);
 
   const resumeExistingSession = (session: InterviewSessionData) => {
     setActiveSession(session);
@@ -132,6 +149,7 @@ function InterviewPage() {
         targetRole: selectedRole,
         jobDescription: jobDescriptionInput.trim() || undefined,
         isAdaptive,
+        projectEvidenceId: selectedProjectId || undefined,
       });
 
       if (res.success && res.data) {
@@ -395,6 +413,38 @@ function InterviewPage() {
                     <div>
                       <span className="font-bold">Interviewer Rationale: </span>
                       {currentQuestion.followupReason}
+                    </div>
+                  </div>
+                )}
+
+                {activeSession.projectContext && (
+                  <div className="rounded-lg bg-purple-50/80 p-3 text-xs text-purple-900 border border-purple-200 flex items-start gap-2.5">
+                    <FolderGit2 size={15} className="mt-0.5 shrink-0 text-purple-600" />
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold">Project Grounded:</span>
+                        <span className="font-semibold text-purple-950">{activeSession.projectContext.projectTitle}</span>
+                        <a
+                          href={activeSession.projectContext.repositoryUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] text-purple-700 hover:underline"
+                        >
+                          <ExternalLink size={10} />
+                          {activeSession.projectContext.repositoryUrl.replace(/^https?:\/\//, "")}
+                        </a>
+                      </div>
+                      {currentQuestion.repositoryFinding && (
+                        <div className="text-[11px] text-purple-800">
+                          <span className="font-semibold">Code Motivation: </span>
+                          {currentQuestion.repositoryFinding}
+                          {currentQuestion.fileReference && (
+                            <span className="ml-1 font-mono text-[10px] bg-purple-100 px-1 py-0.5 rounded">
+                              {currentQuestion.fileReference}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -846,12 +896,23 @@ function InterviewPage() {
               </select>
             </div>
 
-            {/* Context Note */}
+            {/* Grounded GitHub Project */}
             <div className="space-y-2">
-              <label className="block text-xs font-bold text-gray-700">Personalization Data</label>
-              <div className="rounded-xl bg-gray-50 p-3 text-xs text-gray-500 border border-gray-200">
-                Automatically extracts your resume skills, Phase 1 Job Match requirements, and Phase 2 Roadmap gaps.
-              </div>
+              <label className="block text-xs font-bold text-gray-700 flex items-center gap-1.5">
+                <FolderGit2 size={14} className="text-purple-600" /> Grounded GitHub Project (Optional)
+              </label>
+              <select
+                value={selectedProjectId}
+                onChange={(e) => setSelectedProjectId(e.target.value)}
+                className="w-full rounded-xl border border-gray-300 p-3 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">No Project Selected (General / Resume Mock)</option>
+                {userProjects.map((proj) => (
+                  <option key={proj._id} value={proj._id}>
+                    {proj.projectTitle} ({proj.repo} • {proj.metadata.primaryLanguage || "Repo"})
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

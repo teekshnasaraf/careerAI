@@ -14,6 +14,7 @@ import interviewRoutes from "./routes/interview.routes";
 import progressRoutes from "./routes/progress.routes";
 import settingsRoutes from "./routes/settings.routes";
 import jobsRoutes from "./routes/jobs.routes";
+import projectEvidenceRoutes from "./routes/projectEvidence.routes";
 
 dotenv.config();
 
@@ -43,6 +44,7 @@ app.use("/api/interview", interviewRoutes);
 app.use("/api/progress", progressRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/jobs", jobsRoutes);
+app.use("/api/project-evidence", projectEvidenceRoutes);
 
 // Keep upload validation errors JSON-shaped for the frontend. Other errors remain
 // generic so internal implementation details are never exposed to clients.
