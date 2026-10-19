@@ -315,14 +315,16 @@ export const submitQuestionAnswer = async (req: Request, res: Response): Promise
     const targetSkill = currentQ.skill || session.targetSkills?.[0] || "General Engineering";
     const currentDiff = (currentQ.difficulty as InterviewDifficulty) || (session.currentDifficulty as InterviewDifficulty) || "Medium";
 
-    // 1. Evaluate candidate answer against 5-dimension rubric
+    // 1. Evaluate candidate answer against 5-dimension rubric with question-grounded RAG
     const evaluation = await evaluateAnswerWithRubric({
+      questionId: currentQ.questionId,
       questionText: currentQ.text,
       userAnswer,
       skill: targetSkill,
       difficulty: currentDiff,
       targetRole: session.targetRole,
       targetCompany: session.targetCompany,
+      projectContext: session.projectContext,
     });
 
     const responseEntry: IInterviewResponse = {

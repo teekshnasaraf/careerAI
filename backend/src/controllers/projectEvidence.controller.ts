@@ -4,6 +4,11 @@ import Resume from "../models/Resume";
 import {
   runGitHubEvidencePipeline,
   validateAndNormalizeGitHubUrl,
+  getGitHubConfigStatus,
+  GitHubAuthError,
+  GitHubRateLimitError,
+  GitHubNotFoundError,
+  GitHubForbiddenError,
 } from "../services/githubEvidence.service";
 
 /**
@@ -126,9 +131,39 @@ export const analyzeProjectEvidence = async (req: Request, res: Response): Promi
     });
   } catch (error: any) {
     console.error("Error analyzing project evidence:", error);
+    let statusCode = 500;
+    if (error instanceof GitHubAuthError) {
+      statusCode = 401;
+    } else if (error instanceof GitHubRateLimitError) {
+      statusCode = 429;
+    } else if (error instanceof GitHubNotFoundError) {
+      statusCode = 404;
+    } else if (error instanceof GitHubForbiddenError) {
+      statusCode = 403;
+    }
+    res.status(statusCode).json({
+      success: false,
+      errorType: error?.name || "Error",
+      message: error?.message || "Failed to analyze GitHub repository evidence.",
+    });
+  }
+};
+
+/**
+ * Retrieves the current GitHub API configuration and rate-limit status.
+ * GET /api/project-evidence/status
+ */
+export const getGitHubStatus = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const status = await getGitHubConfigStatus();
+    res.status(200).json({
+      success: true,
+      data: status,
+    });
+  } catch (error: any) {
     res.status(500).json({
       success: false,
-      message: error?.message || "Failed to analyze GitHub repository evidence.",
+      message: error?.message || "Failed to retrieve GitHub configuration status.",
     });
   }
 };

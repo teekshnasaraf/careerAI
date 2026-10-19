@@ -2,6 +2,11 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { canonicalizeSkillName } from "../data/skills/skillDependencyGraph";
 import { IAssessedSkillSummary, IInterviewReport, IInterviewResponse } from "../models/InterviewSession";
+import {
+  evaluateAnswerGrounded,
+  isClearAbstention,
+  retrieveExpectedAnswer,
+} from "./answerEvaluationRAG.service";
 
 dotenv.config();
 
@@ -524,43 +529,57 @@ export function getFallbackQuestionForSkill(
 
 /**
  * Evaluates candidate's answer against the 5-dimension rubric with explanatory feedback and STAR ideal answer.
+ * Uses lightweight RAG retrieval against curated domain knowledge, BM25 lexical ranking, and strict abstention handling.
  */
 export async function evaluateAnswerWithRubric(params: {
+  questionId?: string;
   questionText: string;
   userAnswer: string;
   skill: string;
   difficulty: InterviewDifficulty;
   targetRole: string;
   targetCompany: string;
+  projectContext?: {
+    projectTitle: string;
+    repositoryUrl: string;
+    findingsSummary?: string;
+    fileReference?: string;
+  };
 }): Promise<AdaptiveAnswerEvaluation> {
+  const qId = params.questionId || "";
   const trimmedAnswer = params.userAnswer.trim();
 
-  // Handle empty or whitespace answer deterministically
-  if (!trimmedAnswer || trimmedAnswer.length < 5) {
-    const emptyRubric = calculateRubricComposite({
-      technicalCorrectness: 0,
-      accuracy: 0,
-      depth: 0,
-      practicalApplication: 0,
-      communication: 0,
-    });
+  // 1. Fast Deterministic Evaluation using RAG & Concept Matching
+  const ragResult = evaluateAnswerGrounded({
+    questionText: params.questionText,
+    skill: params.skill,
+    userAnswer: params.userAnswer,
+    difficulty: params.difficulty,
+    targetRole: params.targetRole,
+    targetCompany: params.targetCompany,
+    projectContext: params.projectContext,
+  });
+
+  // If answer is empty or clear abstention ("I don't know", "no", "not sure"),
+  // return strict 0% immediately without calling external AI!
+  if (ragResult.isAbstention) {
     return {
-      questionId: "",
+      questionId: qId,
       questionText: params.questionText,
       skill: params.skill,
       userAnswer: params.userAnswer,
-      rubric: emptyRubric,
-      strengths: [],
-      gaps: ["No answer provided or response was too brief to evaluate."],
-      suggestedImprovement: "Provide a detailed explanation defining core concepts, implementation steps, and practical engineering trade-offs.",
-      betterAnswer: `A comprehensive answer on ${params.skill} should define the mechanism clearly, explain real-world usage patterns, and discuss trade-offs and edge cases.`,
+      rubric: ragResult.rubric,
+      strengths: ragResult.strengths,
+      gaps: ragResult.gaps,
+      suggestedImprovement: ragResult.suggestedImprovement,
+      betterAnswer: ragResult.betterAnswer,
       difficultyRating: params.difficulty,
       recommendedAction: "easier_question",
     };
   }
 
-  // Attempt AI Evaluation with Gemini
-  if (ai) {
+  // 2. Attempt AI Evaluation with Gemini if available and not in test mode
+  if (ai && process.env.NODE_ENV !== "test") {
     try {
       const prompt = `You are a Principal Engineering Interview Evaluator at ${params.targetCompany || "Google"}.
 Evaluate the candidate's answer to this interview question using a rigorous 5-dimension rubric.
@@ -572,12 +591,18 @@ INTERVIEW CONTEXT:
 - Question Difficulty: "${params.difficulty}"
 - Question: "${params.questionText}"
 
+EXPECTED TECHNICAL CONCEPTS:
+${ragResult.coveredConcepts.concat(ragResult.missingConcepts).map((c) => `- ${c}`).join("\n")}
+
+IDEAL REFERENCE ANSWER GUIDANCE:
+"${ragResult.betterAnswer}"
+
 CANDIDATE ANSWER:
 "${trimmedAnswer}"
 
-RUBRIC DIMENSIONS (Rate each 0-100 based on realistic technical accuracy):
-1. Technical Correctness (0-100, weight 0.30): Accuracy of terminology, syntax, logic, and architectural concepts.
-2. Accuracy / Relevance (0-100, weight 0.20): How directly the response answers the specific prompt.
+RUBRIC DIMENSIONS (Rate each 0-100 based on realistic technical accuracy against the expected concepts):
+1. Technical Correctness (0-100, weight 0.30): Accuracy of terminology, syntax, logic, and architectural concepts. Penalize incorrect facts.
+2. Accuracy / Relevance (0-100, weight 0.20): How directly the response answers the specific prompt. Give 0 for unrelated content.
 3. Depth of Explanation (0-100, weight 0.20): Demonstrates understanding of internal mechanisms, trade-offs, and failure modes.
 4. Practical Application (0-100, weight 0.15): Uses practical examples, code structure, or real-world implementation reasoning.
 5. Communication & Clarity (0-100, weight 0.15): Structured, coherent, professional engineering communication.
@@ -589,10 +614,10 @@ Return ONLY a single valid JSON object without Markdown backticks:
   "depth": 75,
   "practicalApplication": 80,
   "communication": 85,
-  "strengths": ["Clear explanation of asynchronous event handling", "Correctly cited non-blocking I/O"],
-  "gaps": ["Did not mention backpressure or memory consumption under heavy load"],
-  "suggestedImprovement": "Explain how streams mitigate high memory spikes during large payload handling.",
-  "betterAnswer": "An ideal answer structured with architectural best practices...",
+  "strengths": ["string"],
+  "gaps": ["string"],
+  "suggestedImprovement": "string",
+  "betterAnswer": "Ideal architectural reference answer directly matching the question's technology",
   "recommendedAction": "harder_question"
 }`;
 
@@ -601,12 +626,18 @@ Return ONLY a single valid JSON object without Markdown backticks:
         const cleaned = aiText.replace(/```json/g, "").replace(/```/g, "").trim();
         const parsed = JSON.parse(cleaned);
 
+        const techCorr = Math.max(0, Math.min(100, Number(parsed.technicalCorrectness) || ragResult.rubric.technicalCorrectness));
+        const acc = Math.max(0, Math.min(100, Number(parsed.accuracy) || ragResult.rubric.accuracy));
+        const dep = Math.max(0, Math.min(100, Number(parsed.depth) || ragResult.rubric.depth));
+        const prac = Math.max(0, Math.min(100, Number(parsed.practicalApplication) || ragResult.rubric.practicalApplication));
+        const comm = Math.max(0, Math.min(100, Number(parsed.communication) || ragResult.rubric.communication));
+
         const rubric = calculateRubricComposite({
-          technicalCorrectness: Number(parsed.technicalCorrectness) || 75,
-          accuracy: Number(parsed.accuracy) || 75,
-          depth: Number(parsed.depth) || 70,
-          practicalApplication: Number(parsed.practicalApplication) || 70,
-          communication: Number(parsed.communication) || 75,
+          technicalCorrectness: techCorr,
+          accuracy: acc,
+          depth: dep,
+          practicalApplication: prac,
+          communication: comm,
         });
 
         let recommendedAction: AdaptiveNextAction = "next_skill";
@@ -614,78 +645,53 @@ Return ONLY a single valid JSON object without Markdown backticks:
         else if (rubric.overallScore >= 60) recommendedAction = "follow_up";
         else recommendedAction = "easier_question";
 
+        // Validate betterAnswer: Reject if it references incompatible domains!
+        let safeBetterAnswer = typeof parsed.betterAnswer === "string" && parsed.betterAnswer.trim().length > 20
+          ? parsed.betterAnswer.trim()
+          : ragResult.betterAnswer;
+
+        // Domain validation check: e.g. an Axios question must never return Kotlin/WebSocket betterAnswer!
+        const badDomains = ["kotlin", "websocket", "stateflow", "android"];
+        const isAxiosOrWeb = params.skill.toLowerCase().includes("axios") || params.questionText.toLowerCase().includes("axios");
+        if (isAxiosOrWeb && badDomains.some((d) => safeBetterAnswer.toLowerCase().includes(d))) {
+          safeBetterAnswer = ragResult.betterAnswer;
+        }
+
         return {
-          questionId: "",
+          questionId: qId,
           questionText: params.questionText,
           skill: params.skill,
           userAnswer: params.userAnswer,
           rubric,
-          strengths: Array.isArray(parsed.strengths) && parsed.strengths.length > 0
-            ? parsed.strengths
-            : ["Structured reasoning and coherent communication"],
-          gaps: Array.isArray(parsed.gaps) && parsed.gaps.length > 0
-            ? parsed.gaps
-            : ["Could elaborate further on edge cases and scalability trade-offs"],
-          suggestedImprovement: parsed.suggestedImprovement || "Discuss production trade-offs and error scenarios.",
-          betterAnswer: parsed.betterAnswer || `Structure responses using STAR or architectural components: define core concepts, provide concrete implementation examples, and analyze trade-offs.`,
+          strengths: Array.isArray(parsed.strengths) && parsed.strengths.length > 0 ? parsed.strengths : ragResult.strengths,
+          gaps: Array.isArray(parsed.gaps) && parsed.gaps.length > 0 ? parsed.gaps : ragResult.gaps,
+          suggestedImprovement: parsed.suggestedImprovement || ragResult.suggestedImprovement,
+          betterAnswer: safeBetterAnswer,
           difficultyRating: params.difficulty,
           recommendedAction,
         };
       }
     } catch (err) {
-      console.error("AI Evaluation failed, using deterministic rubric fallback:", err);
+      console.error("AI Evaluation failed, using grounded RAG rubric fallback:", err);
     }
   }
 
-  // Deterministic Rubric Evaluation Fallback
-  const wordCount = trimmedAnswer.split(/\s+/).length;
-  const lowerAnswer = trimmedAnswer.toLowerCase();
-
-  // Evaluate technical vocabulary presence
-  const techTerms = [
-    "architecture", "performance", "scalable", "scalability", "async", "await", "promise",
-    "database", "index", "latency", "throughput", "security", "cache", "redis", "query",
-    "trade-off", "component", "state", "middleware", "api", "rest", "cluster", "memory",
-    "error", "exception", "test", "docker", "service", "concurrency", "thread", "pipeline"
-  ];
-  const matchedTerms = techTerms.filter((term) => lowerAnswer.includes(term));
-  const termDensityScore = Math.min(95, Math.max(50, 50 + matchedTerms.length * 5));
-
-  // Depth based on length and technical elaboration
-  const depthScore = Math.min(95, Math.max(45, 40 + Math.floor(wordCount / 4)));
-  const communicationScore = wordCount >= 30 ? 82 : wordCount >= 15 ? 70 : 55;
-  const accuracyScore = lowerAnswer.includes(params.skill.toLowerCase()) ? 85 : 70;
-  const practicalScore = lowerAnswer.includes("example") || lowerAnswer.includes("use") || lowerAnswer.includes("code") ? 80 : 65;
-
-  const rubric = calculateRubricComposite({
-    technicalCorrectness: termDensityScore,
-    accuracy: accuracyScore,
-    depth: depthScore,
-    practicalApplication: practicalScore,
-    communication: communicationScore,
-  });
-
+  // 3. Deterministic Grounded Evaluation Fallback
   let action: AdaptiveNextAction = "next_skill";
-  if (rubric.overallScore >= 80) action = "harder_question";
-  else if (rubric.overallScore >= 60) action = "follow_up";
+  if (ragResult.rubric.overallScore >= 80) action = "harder_question";
+  else if (ragResult.rubric.overallScore >= 60) action = "follow_up";
   else action = "easier_question";
 
   return {
-    questionId: "",
+    questionId: qId,
     questionText: params.questionText,
     skill: params.skill,
     userAnswer: params.userAnswer,
-    rubric,
-    strengths: [
-      `Addressed core themes of ${params.skill}`,
-      `Incorporated key technical terms (${matchedTerms.slice(0, 3).join(", ") || "domain concepts"})`,
-    ],
-    gaps: [
-      `Could provide deeper analysis of edge cases and high-throughput failure modes`,
-      `Elaborate on production metrics and monitoring in real-world deployments`,
-    ],
-    suggestedImprovement: `Structure your answer with explicit components: 1) Core definition, 2) Implementation pattern with ${params.skill}, and 3) Performance and scale trade-offs.`,
-    betterAnswer: `In a production ${params.targetRole} environment, ${params.skill} should be approached by clearly isolating concerns, implementing resilient error boundaries, and optimizing for both latency and memory efficiency under load.`,
+    rubric: ragResult.rubric,
+    strengths: ragResult.strengths,
+    gaps: ragResult.gaps,
+    suggestedImprovement: ragResult.suggestedImprovement,
+    betterAnswer: ragResult.betterAnswer,
     difficultyRating: params.difficulty,
     recommendedAction: action,
   };

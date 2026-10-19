@@ -1475,3 +1475,165 @@ flowchart LR
 - [ProgressPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Progress/ProgressPage.tsx): Visual progress tracking and achievement badges.
 - [SettingsPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Settings/SettingsPage.tsx): Career profile and preferences forms.
 
+---
+
+## 20. Phase 6: Project Verification, Reference Answers, and Grounded Interview Scoring
+
+### 20.1 Root Cause Analysis of the Four Browser-Tested Problems
+
+Browser-based testing of CareerAI revealed four concrete failure modes across resume parsing, GitHub credentials, question-answer grounding, and scoring mechanics:
+
+#### Issue 1: GitHub Verification Appearing for Resume Content That Is Not a Project
+- **Observed Behavior:** Resume sections such as "Hobbies", "Positions of Responsibility", "Extra-Curricular Activities", or work experience bullets displayed GitHub verification action cards and URL input boxes.
+- **Root Cause:**
+  1. In `backend/src/services/resumeDocumentParser.service.ts`, `SECTION_ALIASES` lacked explicit aliases for `hobbies`, `interests`, `positions of responsibility`, `responsibilities`, `volunteer`, `co-curricular`, `languages known`, and `coursework`. Lines under these headings were either appended to adjacent sections or miscategorized into `sections.projects`.
+  2. In `backend/src/services/resumeStructuredExtractor.service.ts`, `isProjectTitle` lacked a guard to reject non-project category headings, causing blocks titled "Hobbies" or "Responsibilities" to be extracted as `ProjectEntry` records.
+  3. In `frontend/src/pages/Resume/ResumePage.tsx`, the UI iterated directly over `resume.parsedData.projects` without validating that each item was an actual software project, displaying GitHub repository verification input cards for non-project content.
+
+#### Issue 2: Misleading GitHub Token and Configuration Status
+- **Observed Behavior:** The UI displayed confusing or inaccurate messages such as "GitHub token expired" when a token was merely unconfigured, rate-limited, or when a repository was private.
+- **Root Cause:**
+  1. In `backend/src/services/githubEvidence.service.ts`, `fetchGitHubRepoMetadata` did not distinguish between HTTP 401 (bad credentials), HTTP 403 (rate limit vs. unauthorized access), and HTTP 404 (repository private or not found). All non-404/non-rate-limit errors defaulted to a generic 500 error.
+  2. `dotenv.config()` was only executed from the process current working directory. When launched from child directories or IDE configurations, `GITHUB_TOKEN` in `backend/.env` was not reliably read.
+  3. The backend did not expose a configuration status endpoint, leaving the frontend unable to differentiate between unauthenticated public API access (60 req/hr) and authenticated access (5,000 req/hr).
+
+#### Issue 3: Architectural Reference Answers Unrelated to the Actual Interview Question
+- **Observed Behavior:** An interview question regarding Axios interceptors and asynchronous error handling displayed an architectural reference answer discussing Kotlin Coroutines, WebSockets, StateFlow, and Android lifecycle management.
+- **Root Cause:**
+  1. `InterviewPage.tsx` stored `latestEvaluation` in component state without verifying that `latestEvaluation.questionId === currentQuestion.questionId`. When resuming a session or navigating across questions from a mixed project-and-core interview, the previous question's reference answer remained rendered.
+  2. In `adaptiveInterview.service.ts`, when external AI generation was unavailable or timed out, the fallback reference answer did not enforce domain compatibility matching against the active question prompt, permitting cross-domain answers to leak into the UI.
+
+#### Issue 4: Misleading Evaluator Scores for Empty, "I Don't Know", and Incorrect Answers
+- **Observed Behavior:** Submitting "I don't know" was awarded a passing score of 73%, while submitting "no" received 0%, and answers with zero technical substance received communication points that inflated overall scores.
+- **Root Cause:**
+  1. `evaluateAnswerWithRubric` in `adaptiveInterview.service.ts` only checked `trimmedAnswer.length < 5`. The string `"I don't know"` (12 characters) bypassed the check entirely.
+  2. In the offline/deterministic evaluation path, `termDensityScore` started at a baseline of 50%, `depthScore` started at 45%, and `communicationScore` started at 55%. Because the rubric arithmetic calculated a weighted composite without verifying concept coverage, empty or non-substantive responses were awarded high baseline credit (56%–73%).
+
+---
+
+### 20.2 Project-Only GitHub Verification Architecture
+
+To guarantee that GitHub repository verification applies exclusively to actual candidate projects:
+1. **Extended Parser Section Disambiguation:**
+   - In `backend/src/services/resumeDocumentParser.service.ts`, canonical sections now include aliases for `hobbies`, `interests`, `positions of responsibility`, `responsibilities`, `extracurricular`, `achievements`, `education`, and `certifications`.
+2. **Structured Extractor Filtering (`NON_PROJECT_HEADER_RE`):**
+   - In `backend/src/services/resumeStructuredExtractor.service.ts`, `isProjectTitle` explicitly checks lines against `NON_PROJECT_HEADER_RE`. Extracted blocks matching non-project keywords are routed away from the projects array.
+3. **Frontend Project Guard & Standalone Analysis:**
+   - In `frontend/src/pages/Resume/ResumePage.tsx`, `isActualProject` filters entries before rendering verification cards.
+   - Users can explicitly analyze a standalone public repository using the dedicated "Verify Standalone or Custom Project Repository" form, allowing any public GitHub project to be verified without requiring resume modification.
+
+---
+
+### 20.3 GitHub Token & Rate-Limit Status Architecture
+
+#### Multi-Path Environment Loading
+`backend/src/services/githubEvidence.service.ts` ensures environment variables are discovered regardless of current execution context:
+```typescript
+dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "backend/.env") });
+```
+
+#### Safe Status Inspection (`getGitHubConfigStatus`)
+The backend provides a safe status endpoint (`GET /api/project-evidence/status`) querying GitHub's `/rate_limit` endpoint. It returns structured status metadata without ever logging or exposing the token:
+- **`unconfigured`:** "Unauthenticated public API access active (60 req/hr limit). Configure GITHUB_TOKEN on backend for 5,000 req/hr."
+- **`valid`:** "GitHub token configured and verified (authenticated requests active)."
+- **`invalid`:** "Configured GitHub credential (GITHUB_TOKEN) was rejected by GitHub (HTTP 401 Bad credentials)."
+- **`rate_limited`:** "GitHub API rate limit exceeded. Reset time provided."
+
+#### Discriminated Error Hierarchy
+Specific error classes allow controllers to return correct HTTP status codes:
+- `GitHubAuthError` (HTTP 401)
+- `GitHubForbiddenError` (HTTP 403)
+- `GitHubRateLimitError` (HTTP 429)
+- `GitHubNotFoundError` (HTTP 404)
+
+---
+
+### 20.4 Reference-Answer Grounding & Anti-Leakage Design
+
+To guarantee reference answers correspond strictly to the active question:
+1. **Question-ID Binding in Frontend State:**
+   In `frontend/src/pages/Interview/InterviewPage.tsx`, evaluation feedback and reference answers are rendered only when:
+   ```typescript
+   const isEvalForCurrentQuestion = Boolean(
+     latestEvaluation &&
+       currentQuestion &&
+       !submittingAnswer &&
+       ((currentQuestion.questionId && latestEvaluation.questionId === currentQuestion.questionId) ||
+         (!latestEvaluation.questionId && latestEvaluation.questionText === currentQuestion.text))
+   );
+   ```
+2. **State Teardown on Question Transitions:**
+   Navigating to the next question or submitting a new answer clears `latestEvaluation` and hides the reference answer until the new evaluation completes.
+3. **Domain Verification Guard:**
+   `evaluateAnswerGrounded` in `backend/src/services/answerEvaluationRAG.service.ts` prevents domain cross-contamination by penalizing incompatible technologies and selecting curated reference answers strictly matched to the question's target skill.
+
+---
+
+### 20.5 RAG Retrieval & Lexical BM25 Ranking Pipeline
+
+Answer evaluation uses a lightweight, zero-external-dependency Retrieval-Augmented Generation (RAG) and BM25 lexical ranking engine implemented in `backend/src/services/answerEvaluationRAG.service.ts`:
+
+```mermaid
+flowchart TD
+    CandidateAnswer[Candidate Answer] --> AbstentionCheck{Clear Abstention or Empty?}
+    AbstentionCheck -- Yes --> ZeroScore[Assign Strict 0% Across All 5 Dimensions]
+    AbstentionCheck -- No --> LexicalRAG[BM25 Lexical Ranking against Curated Expected Answers]
+    LexicalRAG --> Filter[Domain Incompatibility Penalty & Skill Boost]
+    Filter --> ConceptMatch[Concept Coverage & Misconception Matching]
+    ConceptMatch --> RubricArithmetic[Deterministic 5-Dimension Rubric Scoring]
+    RubricArithmetic --> Synthesis[Feedback, Gaps & Grounded Reference Answer]
+```
+
+1. **Structured Expected-Answer Representation:**
+   Curated knowledge entries for core engineering domains:
+   - **Axios & Error Handling:** Interceptors, 401 handling, refresh queuing, `AbortController`.
+   - **React Architecture:** Unidirectional flow, container/presentational separation, custom hooks, memoization.
+   - **Authentication & Authorization:** JWT tokens, HttpOnly SameSite cookies, refresh rotation, RBAC.
+   - **Database & API Design:** Schema modeling, B-Tree compound indexing, cursor pagination, idempotency.
+   - **Kotlin Coroutines & WebSockets:** OkHttp `WebSocketListener`, `StateFlow` vs. `SharedFlow`, `repeatOnLifecycle`.
+2. **Deterministic Ranking Strategy:**
+   Combines tokenized BM25 keyword matching, skill match bonuses (+35), and domain exclusion penalties (-50) to prevent cross-stack false matches.
+
+---
+
+### 20.6 Grounded 5-Dimension Rubric Scoring Rules
+
+All evaluations produce scores strictly derived from the 5-dimension rubric weights:
+$$\text{Overall Score} = 0.30 \times \text{Correctness} + 0.20 \times \text{Accuracy} + 0.20 \times \text{Depth} + 0.15 \times \text{Practical} + 0.15 \times \text{Communication}$$
+
+#### Explicit Scoring Behavior:
+| Answer Variant | Technical Correctness | Accuracy | Depth | Practical Application | Communication | Overall Score |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Empty Answer** | 0% | 0% | 0% | 0% | 0% | **0%** |
+| **"I don't know" / Abstention** | 0% | 0% | 0% | 0% | 0% | **0%** |
+| **"No" / Declining to Answer** | 0% | 0% | 0% | 0% | 0% | **0%** |
+| **Clearly Irrelevant Answer** | 0% | 10%–20% | 15%–30% | 0% | 10%–35% | **2%–25%** |
+| **Plausible but Incorrect** | 10%–35% | 20%–45% | 20%–40% | 20%–40% | 50%–70% | **25%–45%** |
+| **Partially Correct Answer** | 40%–60% | 45%–65% | 35%–55% | 40%–65% | 50%–75% | **45%–75%** |
+| **Detailed Strong Answer** | 80%–95% | 80%–95% | 75%–90% | 75%–95% | 80%–95% | **80%–92%** |
+
+---
+
+### 20.7 Verification & Test Results
+
+Consolidated test suite execution on Node.js test runner:
+- **Backend Tests:** **234 passed**, 0 failed across 12 test suites in `backend/src/services/*.test.ts`.
+- **Backend TypeScript Check:** `npx tsc --noEmit` passed with 0 diagnostic errors.
+- **Frontend Production Build:** `npm run build` (`tsc -b && vite build`) passed with exit code 0.
+
+---
+
+### 20.8 Known Limitations & Configuration Guidance
+
+1. **GitHub Rate Limits:**
+   - Unauthenticated API access is capped by GitHub at 60 requests per hour per IP.
+   - For high-volume production deployments, configure `GITHUB_TOKEN` in `backend/.env`.
+2. **Private Repositories:**
+   - CareerAI only verifies public GitHub repositories. Attempting to verify private repositories returns HTTP 404 (Not Found or Private).
+3. **Lexical RAG vs. Semantic Embeddings:**
+   - The current RAG implementation uses deterministic BM25 lexical retrieval. While robust and zero-cost, semantic embeddings (e.g. Gemini `text-embedding-004`) can be configured in future phases for continuous semantic distance scoring.
+
+

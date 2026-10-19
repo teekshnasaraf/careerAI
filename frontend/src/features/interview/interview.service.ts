@@ -26,6 +26,7 @@ export interface EvaluationEntry {
   depth: number;
   confidence: number;
   practicalApplication?: number;
+  feedback?: string;
   strengths?: string[];
   gaps?: string[];
   suggestedImprovement?: string;

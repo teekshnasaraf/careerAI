@@ -51,7 +51,9 @@ import {
 import {
   analyzeProjectEvidenceApi,
   getAllUserProjectEvidenceApi,
+  getGitHubConfigStatusApi,
   type ProjectEvidenceData,
+  type GitHubConfigStatus,
 } from "../../features/projectEvidence/projectEvidence.service";
 import type { ResumeData } from "../../types/resume";
 import axios from "axios";
@@ -91,6 +93,29 @@ function ResumePage() {
   const [verifyingProjectTitle, setVerifyingProjectTitle] = useState<string | null>(null);
   const [verificationErrors, setVerificationErrors] = useState<Record<string, string>>({});
   const [expandedEvidence, setExpandedEvidence] = useState<Record<string, boolean>>({});
+  const [gitHubStatus, setGitHubStatus] = useState<GitHubConfigStatus | null>(null);
+
+  // Standalone public repo verification
+  const [standaloneTitle, setStandaloneTitle] = useState("");
+  const [standaloneUrl, setStandaloneUrl] = useState("");
+  const [standaloneSkills, setStandaloneSkills] = useState("");
+  const [isVerifyingStandalone, setIsVerifyingStandalone] = useState(false);
+  const [standaloneError, setStandaloneError] = useState<string | null>(null);
+
+  const isActualProject = (title: string): boolean => {
+    const t = title.toLowerCase().trim();
+    const nonProjectWords = [
+      "hobby", "hobbies", "interest", "interests",
+      "responsibility", "responsibilities", "position of responsibility", "positions of responsibility",
+      "education", "academic", "academics", "coursework",
+      "achievement", "achievements", "award", "awards", "certification", "certifications",
+      "extra-curricular", "extracurricular", "volunteer", "volunteering", "co-curricular",
+      "languages known", "personal details", "contact"
+    ];
+    return !nonProjectWords.some(
+      (w) => t === w || t.startsWith(`${w}:`) || t.startsWith(`${w} -`) || t.startsWith(`${w}/`) || t.includes("responsibilit")
+    );
+  };
 
   const fetchProjectEvidence = async () => {
     try {
@@ -139,6 +164,18 @@ function ResumePage() {
     };
     fetchActiveRoadmap();
     fetchProjectEvidence();
+
+    const fetchConfigStatus = async () => {
+      try {
+        const res = await getGitHubConfigStatusApi();
+        if (res.success && res.data) {
+          setGitHubStatus(res.data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch GitHub config status:", err);
+      }
+    };
+    fetchConfigStatus();
   }, []);
 
   const handleVerifyProjectEvidence = async (projectTitle: string, claimedSkills: string[]) => {
@@ -175,6 +212,52 @@ function ResumePage() {
       setVerificationErrors((prev) => ({ ...prev, [projectTitle]: msg }));
     } finally {
       setVerifyingProjectTitle(null);
+    }
+  };
+
+  const handleVerifyStandaloneProject = async () => {
+    if (!standaloneTitle.trim()) {
+      setStandaloneError("Please enter a project title.");
+      return;
+    }
+    if (!standaloneUrl.trim()) {
+      setStandaloneError("Please enter a valid GitHub repository URL.");
+      return;
+    }
+
+    try {
+      setIsVerifyingStandalone(true);
+      setStandaloneError(null);
+      const skillsArray = standaloneSkills
+        .split(/[,;\n]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const res = await analyzeProjectEvidenceApi({
+        projectTitle: standaloneTitle.trim(),
+        repositoryUrl: standaloneUrl.trim(),
+        resumeId: resume?._id,
+        claimedSkills: skillsArray.length > 0 ? skillsArray : undefined,
+      });
+
+      if (res.success && res.data) {
+        setProjectEvidenceMap((prev) => ({
+          ...prev,
+          [res.data.projectTitle.toLowerCase().trim()]: res.data,
+        }));
+        setExpandedEvidence((prev) => ({
+          ...prev,
+          [res.data.projectTitle]: true,
+        }));
+        setStandaloneTitle("");
+        setStandaloneUrl("");
+        setStandaloneSkills("");
+      }
+    } catch (err: any) {
+      console.error("Standalone verification error:", err);
+      setStandaloneError(err.response?.data?.message || err.message || "Failed to verify repository evidence.");
+    } finally {
+      setIsVerifyingStandalone(false);
     }
   };
 
@@ -843,7 +926,10 @@ function ResumePage() {
             )}
 
             {/* TAB 5: Projects */}
-            {activeTab === "projects" && (
+            {activeTab === "projects" && (() => {
+              const actualProjects = (resume.parsedData?.projects || []).filter((p) => isActualProject(p.title));
+
+              return (
               <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm space-y-6">
                 <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
                   <div>
@@ -857,9 +943,42 @@ function ResumePage() {
                   </span>
                 </div>
 
-                {resume.parsedData?.projects && resume.parsedData.projects.length > 0 ? (
+                {/* GitHub Configuration & Rate-Limit Status Banner */}
+                {gitHubStatus && (
+                  <div
+                    className={`rounded-xl border p-3.5 text-xs flex flex-wrap items-center justify-between gap-3 ${
+                      gitHubStatus.status === "valid"
+                        ? "bg-emerald-50/70 border-emerald-200 text-emerald-900"
+                        : gitHubStatus.status === "invalid"
+                        ? "bg-red-50/70 border-red-200 text-red-900"
+                        : gitHubStatus.status === "rate_limited"
+                        ? "bg-amber-50/70 border-amber-200 text-amber-900"
+                        : "bg-slate-50 border-slate-200 text-slate-800"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <GitBranch size={15} className="shrink-0" />
+                      <div>
+                        <span className="font-bold">
+                          {gitHubStatus.status === "valid" && "GitHub Token Active (Authenticated 5,000 req/hr)"}
+                          {gitHubStatus.status === "unconfigured" && "Public GitHub API Access (Unauthenticated 60 req/hr)"}
+                          {gitHubStatus.status === "invalid" && "GitHub Credential Rejected (HTTP 401 Bad credentials)"}
+                          {gitHubStatus.status === "rate_limited" && "GitHub API Rate Limit Exceeded"}
+                        </span>
+                        <p className="text-[11px] opacity-80 mt-0.5">{gitHubStatus.message}</p>
+                      </div>
+                    </div>
+                    {gitHubStatus.rateLimitRemaining !== undefined && (
+                      <span className="text-[11px] font-semibold bg-white/80 px-2.5 py-1 rounded-md border border-black/5 shrink-0">
+                        {gitHubStatus.rateLimitRemaining} / {gitHubStatus.rateLimitLimit} requests remaining
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {actualProjects.length > 0 ? (
                   <div className="space-y-6">
-                    {resume.parsedData.projects.map((proj, idx) => {
+                    {actualProjects.map((proj, idx) => {
                       const analysis = resume.projectAnalysis?.find((a) => a.title === proj.title);
                       const normTitle = proj.title.toLowerCase().trim();
                       const evidence = projectEvidenceMap[normTitle];
@@ -1226,10 +1345,75 @@ function ResumePage() {
                     })}
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500">No Project entries detected in document text.</p>
+                  <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-5 text-center text-xs text-gray-500">
+                    No verified project entries found in the resume. You can link and verify a standalone repository below.
+                  </div>
                 )}
+
+                {/* Standalone Public Repository Verification */}
+                <div className="mt-8 rounded-xl border border-dashed border-purple-200 bg-purple-50/20 p-5 space-y-4">
+                  <div className="flex items-center gap-2">
+                    <FolderGit2 className="h-4 w-4 text-purple-700" />
+                    <h4 className="text-xs font-bold text-gray-900 uppercase tracking-wider">
+                      Verify Standalone or Custom Project Repository
+                    </h4>
+                  </div>
+                  <p className="text-xs text-gray-600">
+                    Want to assess a project not listed on your resume or verify a standalone public GitHub repository? Enter details below:
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Project Name (e.g. CareerAI Engine)"
+                      value={standaloneTitle}
+                      onChange={(e) => setStandaloneTitle(e.target.value)}
+                      className="rounded-xl border border-gray-300 px-3.5 py-2 text-xs focus:border-purple-500 focus:outline-none"
+                    />
+                    <input
+                      type="url"
+                      placeholder="https://github.com/owner/repository"
+                      value={standaloneUrl}
+                      onChange={(e) => setStandaloneUrl(e.target.value)}
+                      className="rounded-xl border border-gray-300 px-3.5 py-2 text-xs focus:border-purple-500 focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Skills (comma-separated, optional)"
+                      value={standaloneSkills}
+                      onChange={(e) => setStandaloneSkills(e.target.value)}
+                      className="rounded-xl border border-gray-300 px-3.5 py-2 text-xs focus:border-purple-500 focus:outline-none"
+                    />
+                  </div>
+
+                  {standaloneError && (
+                    <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 border border-red-200 flex items-center gap-2">
+                      <AlertTriangle size={14} className="shrink-0" />
+                      <span>{standaloneError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={isVerifyingStandalone}
+                    onClick={handleVerifyStandaloneProject}
+                    className="flex items-center gap-1.5 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-purple-700 disabled:opacity-60 transition"
+                  >
+                    {isVerifyingStandalone ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin" />
+                        <span>Verifying Repository...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ShieldCheck size={14} />
+                        <span>Verify Standalone Repository</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
-            )}
+              );
+            })()}
 
             {/* TAB 6: Job Description Match */}
             {activeTab === "job_match" && (

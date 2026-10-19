@@ -18,6 +18,7 @@ import {
   ChevronUp,
   FolderGit2,
   ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 
 import {
@@ -137,9 +138,15 @@ function InterviewPage() {
     setActiveSession(session);
     setActiveResumeBanner(null);
     const answeredCount = session.responses.length;
-    setCurrentQuestionIdx(Math.min(answeredCount, session.questions.length - 1));
+    const targetIdx = Math.min(answeredCount, session.questions.length - 1);
+    setCurrentQuestionIdx(targetIdx);
     setUserAnswerInput("");
-    setLatestEvaluation(session.responses[session.responses.length - 1] || null);
+    setShowBetterAnswer(false);
+    const activeQ = session.questions[targetIdx];
+    const matchingEval = session.responses.find(
+      (r) => (activeQ?.questionId && r.questionId === activeQ.questionId) || r.questionText === activeQ?.text
+    );
+    setLatestEvaluation(matchingEval || null);
   };
 
   const handleStartSession = async () => {
@@ -176,13 +183,15 @@ function InterviewPage() {
   };
 
   const handleSubmitAnswer = async () => {
-    if (!activeSession || !userAnswerInput.trim()) return;
+    if (!activeSession || !userAnswerInput.trim() || submittingAnswer) return;
 
     const currentQ: QuestionEntry | undefined = activeSession.questions[currentQuestionIdx];
     if (!currentQ) return;
 
     try {
       setSubmittingAnswer(true);
+      setLatestEvaluation(null);
+      setShowBetterAnswer(false);
       const res = await submitQuestionAnswerApi({
         sessionId: activeSession._id,
         questionId: currentQ.questionId,
@@ -243,6 +252,13 @@ function InterviewPage() {
   };
 
   const currentQuestion = activeSession?.questions[currentQuestionIdx];
+  const isEvalForCurrentQuestion = Boolean(
+    latestEvaluation &&
+      currentQuestion &&
+      !submittingAnswer &&
+      ((currentQuestion.questionId && latestEvaluation.questionId === currentQuestion.questionId) ||
+        (!latestEvaluation.questionId && latestEvaluation.questionText === currentQuestion.text))
+  );
 
   const getDifficultyBadge = (diff: string) => {
     switch (diff) {
@@ -486,48 +502,71 @@ function InterviewPage() {
                 />
               </div>
 
-              {/* Submission Controls */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                <button
-                  onClick={handleSubmitAnswer}
-                  disabled={submittingAnswer || !userAnswerInput.trim()}
-                  className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {submittingAnswer ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                  {submittingAnswer ? "Evaluating Answer against 5-Dimension Rubric..." : "Submit Answer to Evaluator"}
-                </button>
-
-                {latestEvaluation && (
+                {/* Submission Controls */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                   <button
-                    onClick={handleNextQuestion}
-                    className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700"
+                    onClick={handleSubmitAnswer}
+                    disabled={submittingAnswer || !userAnswerInput.trim()}
+                    className="flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-blue-700 disabled:opacity-50"
                   >
-                    <span>
-                      {currentQuestionIdx + 1 < activeSession.length ? "Continue to Next Question" : "Finish & View Report"}
-                    </span>
-                    <ArrowRight size={16} />
+                    {submittingAnswer ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                    {submittingAnswer ? "Evaluating Answer against 5-Dimension Rubric..." : "Submit Answer to Evaluator"}
                   </button>
-                )}
-              </div>
 
-              {/* Answer Evaluation Feedback Panel */}
-              {latestEvaluation && (
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-6 space-y-5 mt-6 animate-fadeIn">
-                  <div className="flex flex-wrap items-center justify-between gap-4 border-b border-emerald-100 pb-3">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                      <h4 className="font-bold text-emerald-950 text-sm">
-                        5-Dimension Engineering Rubric Evaluation
-                      </h4>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-gray-500">Overall Score:</span>
-                      <span className="rounded-lg bg-emerald-600 px-3 py-1 text-sm font-extrabold text-white shadow-sm">
-                        {latestEvaluation.score}%
+                  {isEvalForCurrentQuestion && (
+                    <button
+                      onClick={handleNextQuestion}
+                      className="flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md transition hover:bg-emerald-700"
+                    >
+                      <span>
+                        {currentQuestionIdx + 1 < activeSession.length ? "Continue to Next Question" : "Finish & View Report"}
                       </span>
-                    </div>
+                      <ArrowRight size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Submitting progress banner */}
+                {submittingAnswer && (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 flex items-center justify-center gap-3 text-xs font-semibold text-blue-900 mt-4 animate-pulse">
+                    <Loader2 size={16} className="animate-spin text-blue-600" />
+                    <span>Analyzing technical response against grounded engineering rubric...</span>
                   </div>
+                )}
+
+                {/* Answer Evaluation Feedback Panel */}
+                {isEvalForCurrentQuestion && latestEvaluation && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/30 p-6 space-y-5 mt-6 animate-fadeIn">
+                    {/* Abstention Transparency Notice */}
+                    {latestEvaluation.score === 0 && (
+                      <div className="rounded-xl bg-amber-50 p-4 border border-amber-200 text-xs text-amber-900 flex items-start gap-2.5">
+                        <AlertTriangle size={16} className="text-amber-600 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="font-bold block">Abstention / Incomplete Technical Knowledge Demonstrated</span>
+                          <span className="text-[11px] text-amber-800 leading-relaxed">
+                            {latestEvaluation.feedback || "0% awarded across rubric dimensions. The candidate did not demonstrate required knowledge for this topic."}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-between gap-4 border-b border-emerald-100 pb-3">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                        <h4 className="font-bold text-emerald-950 text-sm">
+                          5-Dimension Engineering Rubric Evaluation
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500">Overall Score:</span>
+                        <span className={`rounded-lg px-3 py-1 text-sm font-extrabold text-white shadow-sm ${
+                          latestEvaluation.score >= 70 ? "bg-emerald-600" : latestEvaluation.score >= 40 ? "bg-amber-600" : "bg-red-600"
+                        }`}>
+                          {latestEvaluation.score}%
+                        </span>
+                      </div>
+                    </div>
 
                   {/* 5-Dimension Metric Badges */}
                   <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -624,9 +663,15 @@ function InterviewPage() {
                       </button>
 
                       {showBetterAnswer && (
-                        <p className="mt-2 rounded-lg bg-white p-3.5 text-xs text-gray-800 leading-relaxed border border-gray-200">
-                          {latestEvaluation.betterAnswer}
-                        </p>
+                        <div className="mt-2 rounded-xl bg-gradient-to-br from-slate-50 to-teal-50/30 p-4 border border-emerald-200 space-y-2">
+                          <div className="flex items-center gap-2 text-emerald-900 text-xs font-bold uppercase tracking-wider">
+                            <BookOpen size={14} />
+                            <span>Architectural Reference Answer — Grounded in Expected Solution</span>
+                          </div>
+                          <p className="rounded-lg bg-white p-3.5 text-xs text-gray-800 leading-relaxed border border-emerald-100 whitespace-pre-line shadow-sm">
+                            {latestEvaluation.betterAnswer}
+                          </p>
+                        </div>
                       )}
                     </div>
                   )}

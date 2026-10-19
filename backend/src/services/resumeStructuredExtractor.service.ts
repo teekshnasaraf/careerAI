@@ -364,6 +364,9 @@ export const extractExperience = (
 const SENTENCE_VERB_RE =
   /^(?:Built|Developed|Designed|Created|Implemented|Built|Deployed|Led|Improved|Optimized|Automated|Analyzed|Integrated|Built|Used|Utilized|Trained|Performed|Collaborated|Managed|Worked|Contributed|Achieved|Completed|Reduced|Increased|Leveraged|Established|Handled|Maintained|Supported|Delivered|Launched|Coordinated|Researched|Wrote|Generated|Applied|Extended|Configured|Migrated|Scaled|Enabled|Produced|Tested|Solved|Designed|Prepared|Ensured|Provided|Introduced|Monitored|Refactored)/i;
 
+const NON_PROJECT_HEADER_RE =
+  /^(?:Hobbies|Interests|Personal Interests|Hobbies and Interests|Languages|Known Languages|Languages Known|Responsibilities|Key Responsibilities|Positions? of Responsibility|Leadership|Volunteering|Volunteer Work|Community Involvement|References|Education|Experience|Work Experience|Certifications?|Achievements?|Publications?|Extracurricular|Skills|Technical Skills|Summary|Profile|Contact)\b/i;
+
 /**
  * Returns true when a line should start a new project entry.
  * A project title line must be:
@@ -372,6 +375,7 @@ const SENTENCE_VERB_RE =
  *  - Not a bullet-point line
  *  - Not a URL-only line
  *  - Not starting with a common descriptive/action verb (those are description lines)
+ *  - Not a non-project header (e.g. Hobbies, Responsibilities, Extracurricular, Languages)
  *  - Not a date-range-only line
  */
 const isProjectTitle = (line: string): boolean => {
@@ -380,6 +384,8 @@ const isProjectTitle = (line: string): boolean => {
   if (isUrlLine(line)) return false;
   // A line that is primarily a URL
   if (URL_RE.test(line) && line.replace(URL_RE, "").trim().length < 10) return false;
+  // Non-project section titles or responsibilities headers
+  if (NON_PROJECT_HEADER_RE.test(line.trim())) return false;
   // Lines starting with sentence-starting verbs are descriptions
   if (SENTENCE_VERB_RE.test(line)) return false;
   // Must start with a capital letter (project names are proper nouns / title case)
@@ -451,7 +457,14 @@ export const extractProjects = (projectsSection: string): StructuredProject[] =>
   }
 
   if (current) projects.push(current);
-  return projects;
+
+  // Filter out any entries that got misclassified as projects
+  return projects.filter(
+    (p) =>
+      p.title &&
+      p.title.trim().length >= 3 &&
+      !NON_PROJECT_HEADER_RE.test(p.title.trim())
+  );
 };
 
 // ─── Main entry point ─────────────────────────────────────────────────────────

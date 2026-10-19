@@ -13,11 +13,60 @@
 import { SKILL_TAXONOMY, type SkillCategory } from "../data/skills/skillTaxonomy";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import path from "path";
 
+// Ensure .env is loaded from both current working dir and backend directory root
 dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "backend/.env") });
 
 const apiKey = process.env.GEMINI_API_KEY || "";
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+
+// ─── Custom GitHub Errors ───────────────────────────────────────────────────
+
+export class GitHubAuthError extends Error {
+  constructor(message = "Configured GitHub credential was rejected (HTTP 401 Unauthorized). Please verify or refresh GITHUB_TOKEN.") {
+    super(message);
+    this.name = "GitHubAuthError";
+  }
+}
+
+export class GitHubRateLimitError extends Error {
+  public resetTime?: string;
+  constructor(
+    message = "GitHub API rate limit exceeded. Public requests are limited to 60/hr. Set GITHUB_TOKEN on backend for 5,000/hr.",
+    resetTime?: string
+  ) {
+    super(message);
+    this.name = "GitHubRateLimitError";
+    this.resetTime = resetTime;
+  }
+}
+
+export class GitHubNotFoundError extends Error {
+  constructor(owner: string, repo: string) {
+    super(`Repository "${owner}/${repo}" was not found or is private.`);
+    this.name = "GitHubNotFoundError";
+  }
+}
+
+export class GitHubForbiddenError extends Error {
+  constructor(owner: string, repo: string) {
+    super(`Access forbidden for repository "${owner}/${repo}". Check repository permissions.`);
+    this.name = "GitHubForbiddenError";
+  }
+}
+
+export interface GitHubConfigStatus {
+  configured: boolean;
+  status: "unconfigured" | "valid" | "invalid" | "rate_limited";
+  message: string;
+  rateLimitRemaining?: number;
+  rateLimitLimit?: number;
+  rateLimitReset?: string;
+}
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -276,6 +325,100 @@ function getGitHubHeaders(): HeadersInit {
 }
 
 /**
+ * Retrieves the current GitHub configuration status and rate limit safely.
+ * Never exposes the actual token string.
+ */
+export async function getGitHubConfigStatus(): Promise<GitHubConfigStatus> {
+  const token = process.env.GITHUB_TOKEN?.trim();
+
+  if (!token) {
+    try {
+      const res = await fetch(`${GITHUB_API_BASE}/rate_limit`, {
+        headers: {
+          Accept: "application/vnd.github.v3+json",
+          "User-Agent": "CareerAI-Project-Evidence-Verifier/1.0",
+        },
+        signal: AbortSignal.timeout(5000),
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as any;
+        const core = data?.resources?.core;
+        return {
+          configured: false,
+          status: "unconfigured",
+          message: "Unauthenticated public API access active (60 req/hr limit). Configure GITHUB_TOKEN on the backend for 5,000 req/hr.",
+          rateLimitRemaining: core?.remaining,
+          rateLimitLimit: core?.limit,
+          rateLimitReset: core?.reset ? new Date(core.reset * 1000).toISOString() : undefined,
+        };
+      }
+    } catch {
+      // Fallback if GitHub rate_limit endpoint unreachable
+    }
+
+    return {
+      configured: false,
+      status: "unconfigured",
+      message: "Unauthenticated public API access active (60 req/hr limit). Configure GITHUB_TOKEN on the backend for 5,000 req/hr.",
+    };
+  }
+
+  // Token is configured, verify against GitHub rate_limit endpoint
+  try {
+    const res = await fetch(`${GITHUB_API_BASE}/rate_limit`, {
+      headers: {
+        Accept: "application/vnd.github.v3+json",
+        "User-Agent": "CareerAI-Project-Evidence-Verifier/1.0",
+        Authorization: `Bearer ${token}`,
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (res.status === 401) {
+      return {
+        configured: true,
+        status: "invalid",
+        message: "Configured GitHub credential (GITHUB_TOKEN) was rejected by GitHub (HTTP 401 Bad credentials). Please verify or refresh the token.",
+      };
+    }
+
+    if (res.status === 403 || res.status === 429) {
+      return {
+        configured: true,
+        status: "rate_limited",
+        message: "GitHub API rate limit exceeded for the configured token.",
+      };
+    }
+
+    if (res.ok) {
+      const data = (await res.json()) as any;
+      const core = data?.resources?.core;
+      return {
+        configured: true,
+        status: "valid",
+        message: "GitHub token configured and verified (authenticated requests active).",
+        rateLimitRemaining: core?.remaining,
+        rateLimitLimit: core?.limit,
+        rateLimitReset: core?.reset ? new Date(core.reset * 1000).toISOString() : undefined,
+      };
+    }
+
+    return {
+      configured: true,
+      status: "invalid",
+      message: `GitHub API returned HTTP ${res.status} when verifying credentials.`,
+    };
+  } catch (err: any) {
+    return {
+      configured: true,
+      status: "invalid",
+      message: `Failed to verify GitHub token: ${err?.message || "network error"}`,
+    };
+  }
+}
+
+/**
  * Fetches repository metadata from GitHub API.
  */
 export async function fetchGitHubRepoMetadata(owner: string, repo: string): Promise<RepositoryMetadata> {
@@ -286,16 +429,27 @@ export async function fetchGitHubRepoMetadata(owner: string, repo: string): Prom
     signal: AbortSignal.timeout(10000),
   });
 
-  if (res.status === 404) {
-    throw new Error(`Repository "${owner}/${repo}" was not found or is private.`);
+  if (res.status === 401) {
+    throw new GitHubAuthError();
   }
 
-  if (res.status === 403) {
+  if (res.status === 404) {
+    throw new GitHubNotFoundError(owner, repo);
+  }
+
+  if (res.status === 403 || res.status === 429) {
     const rateLimitRemaining = res.headers.get("x-ratelimit-remaining");
-    if (rateLimitRemaining === "0") {
-      throw new Error("GitHub API rate limit exceeded. Please wait or set GITHUB_TOKEN on the backend.");
+    const rateLimitReset = res.headers.get("x-ratelimit-reset");
+    const resetDate = rateLimitReset ? new Date(parseInt(rateLimitReset, 10) * 1000).toLocaleTimeString() : undefined;
+    if (rateLimitRemaining === "0" || res.status === 429) {
+      throw new GitHubRateLimitError(
+        `GitHub API rate limit exceeded.${resetDate ? ` Resets around ${resetDate}.` : ""} ${
+          process.env.GITHUB_TOKEN ? "Configured token has reached its limit." : "Unauthenticated public requests are limited to 60/hr. Set GITHUB_TOKEN on backend for 5,000/hr."
+        }`,
+        rateLimitReset || undefined
+      );
     }
-    throw new Error(`Access forbidden for repository "${owner}/${repo}". Check repository permissions.`);
+    throw new GitHubForbiddenError(owner, repo);
   }
 
   if (!res.ok) {
@@ -354,13 +508,27 @@ export async function fetchGitHubRepoTree(
         signal: AbortSignal.timeout(10000),
       });
 
+      if (res.status === 401) {
+        throw new GitHubAuthError();
+      }
+
+      if (res.status === 403 || res.status === 429) {
+        const rateLimitRemaining = res.headers.get("x-ratelimit-remaining");
+        if (rateLimitRemaining === "0" || res.status === 429) {
+          throw new GitHubRateLimitError();
+        }
+      }
+
       if (res.ok) {
         treeData = await res.json();
         activeBranch = b;
         break;
       }
-    } catch {
-      // try next
+    } catch (err) {
+      if (err instanceof GitHubAuthError || err instanceof GitHubRateLimitError) {
+        throw err;
+      }
+      // try next branch
     }
   }
 

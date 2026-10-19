@@ -131,9 +131,27 @@ export const getProjectEvidenceByIdApi = async (
   return response.data;
 };
 
+export interface GitHubConfigStatus {
+  configured: boolean;
+  status: "unconfigured" | "valid" | "invalid" | "rate_limited";
+  message: string;
+  rateLimitRemaining?: number;
+  rateLimitLimit?: number;
+  rateLimitReset?: string;
+}
+
+export const getGitHubConfigStatusApi = async (): Promise<{
+  success: boolean;
+  data: GitHubConfigStatus;
+}> => {
+  const response = await api.get("/project-evidence/status");
+  return response.data;
+};
+
 export const deleteProjectEvidenceApi = async (
   id: string
 ): Promise<{ success: boolean; message: string }> => {
   const response = await api.delete(`/project-evidence/${id}`);
   return response.data;
 };
+

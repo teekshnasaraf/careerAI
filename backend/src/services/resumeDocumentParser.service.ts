@@ -47,14 +47,20 @@ const SUPPORTED_MIME_TYPES = new Set([
 const SECTION_ALIASES: Record<ResumeSectionKey, string[]> = {
   summary: ["summary", "professional summary", "profile", "professional profile", "objective", "career objective", "about me", "overview", "personal profile"],
   education: ["education", "academic background", "academic qualifications", "qualifications", "academics", "educational details"],
-  skills: ["skills", "technical skills", "core skills", "key skills", "professional skills", "technical competencies", "core competencies", "technologies", "tools and technologies"],
+  skills: ["skills", "technical skills", "core skills", "key skills", "professional skills", "technical competencies", "core competencies", "technologies", "tools and technologies", "technical stack", "languages", "known languages", "languages known"],
   experience: ["experience", "work experience", "professional experience", "employment history", "work history", "career history", "professional background"],
   projects: ["projects", "personal projects", "academic projects", "relevant projects", "key projects", "featured projects", "technical projects", "project experience"],
-  certifications: ["certifications", "certificates", "licenses and certifications", "professional certifications", "credentials"],
+  certifications: ["certifications", "certificates", "licenses and certifications", "professional certifications", "credentials", "courses", "coursework", "relevant coursework", "training"],
   achievements: ["achievements", "awards", "honors", "accomplishments", "awards and achievements"],
   internships: ["internships", "internship", "internship experience"],
   publications: ["publications", "research publications", "papers", "research papers"],
-  extracurricular: ["extracurricular activities", "extracurriculars", "activities", "leadership and activities", "co curricular activities"],
+  extracurricular: [
+    "extracurricular activities", "extracurriculars", "activities", "leadership and activities",
+    "co curricular activities", "co-curricular activities", "co curricular", "co-curricular",
+    "hobbies", "interests", "personal interests", "hobbies and interests",
+    "responsibilities", "positions of responsibility", "position of responsibility", "roles and responsibilities", "key responsibilities",
+    "leadership", "volunteer", "volunteering", "volunteer experience", "community involvement"
+  ],
 };
 
 const emptySections = (): ResumeSections => ({
