@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import { canonicalizeSkillName } from "../data/skills/skillDependencyGraph";
-import { IAssessedSkillSummary, IInterviewResponse } from "../models/InterviewSession";
+import { IAssessedSkillSummary, IInterviewReport, IInterviewResponse } from "../models/InterviewSession";
 
 dotenv.config();
 
@@ -864,32 +864,7 @@ export function synthesizeAdaptiveInterviewReport(params: {
   allTargetSkills: string[];
   responses: IInterviewResponse[];
   historicalSessions?: Array<{ overallScore: number; createdAt: Date }>;
-}): {
-  overallScore: number;
-  topicBreakdown: Array<{ topic: string; score: number }>;
-  dimensionScores: {
-    technicalCorrectness: number;
-    accuracy: number;
-    depth: number;
-    communication: number;
-    practicalApplication: number;
-  };
-  assessedSkills: IAssessedSkillSummary[];
-  unassessedSkills: string[];
-  strengths: string[];
-  weaknesses: string[];
-  conceptsToRevise: string[];
-  suggestedResources: string[];
-  suggestedProjects: string[];
-  recommendedRoadmapSteps: string[];
-  recommendedNextInterview: string;
-  historicalComparison?: {
-    previousAverageScore: number;
-    scoreDelta: number;
-    sessionsAnalyzed: number;
-    note: string;
-  };
-} {
+}): IInterviewReport {
   const responses = params.responses || [];
 
   if (responses.length === 0) {

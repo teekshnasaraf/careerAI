@@ -1394,6 +1394,7 @@ flowchart LR
   6. *Fixed Mode Interview Auto-Completion:* Answering the final question in fixed mode automatically completes the session and synthesizes the 5-dimension rubric performance report (`interview.controller.ts`).
   7. *Test Isolation & AI Fallback Bypasses:* Gemini AI calls now immediately return empty strings in `test` mode (`adaptiveInterview.service.ts` and `interview.controller.ts`), ensuring offline, deterministic test execution with zero external network dependencies or API key requirements.
   8. *Seamless UX Handoffs:* Added "Practice in Interview" action triggers directly from job match missing skills and personalized roadmap steps (`ResumePage.tsx`), automatically hydrating target skills and roles into the interview setup wizard (`InterviewPage.tsx`).
+  9. *Canonical Interview Report Typing:* Unified report types across models, services, and frontend by exporting `IInterviewReport` from `InterviewSession.ts`, standardizing `topicBreakdown`, non-optional guaranteed fields, and typing `synthesizeAdaptiveInterviewReport` explicitly.
 - **Files Modified/Added:**
   - `backend/src/controllers/analysis.controller.ts`
   - `backend/src/controllers/dashboard.controller.ts`
@@ -1401,9 +1402,11 @@ flowchart LR
   - `backend/src/controllers/progress.controller.ts`
   - `backend/src/controllers/projectEvidence.controller.ts`
   - `backend/src/controllers/resume.controller.ts`
+  - `backend/src/models/InterviewSession.ts`
   - `backend/src/routes/projectEvidence.routes.ts`
   - `backend/src/services/adaptiveInterview.service.ts`
   - `backend/src/services/endToEndIntegration.service.test.ts`
+  - `frontend/src/features/interview/interview.service.ts`
   - `frontend/src/features/projectEvidence/projectEvidence.service.ts`
   - `frontend/src/pages/Interview/InterviewPage.tsx`
   - `frontend/src/pages/Resume/ResumePage.tsx`

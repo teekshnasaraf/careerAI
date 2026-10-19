@@ -1,7 +1,7 @@
 import { Request, Response } from "express";
 import Resume from "../models/Resume";
 import Analysis from "../models/Analysis";
-import InterviewSession, { IAssessedSkillSummary, IInterviewResponse } from "../models/InterviewSession";
+import InterviewSession, { IAssessedSkillSummary, IInterviewReport, IInterviewResponse } from "../models/InterviewSession";
 import Roadmap from "../models/Roadmap";
 import ProjectEvidence from "../models/ProjectEvidence";
 import { parseJobDescription } from "../services/jobDescription.service";
@@ -400,7 +400,7 @@ export const submitQuestionAnswer = async (req: Request, res: Response): Promise
           .sort({ createdAt: -1 })
           .limit(10);
 
-        const report = synthesizeAdaptiveInterviewReport({
+        const report: IInterviewReport = synthesizeAdaptiveInterviewReport({
           targetRole: session.targetRole,
           targetCompany: session.targetCompany,
           allTargetSkills: session.targetSkills || [targetSkill],
@@ -481,7 +481,7 @@ export const submitQuestionAnswer = async (req: Request, res: Response): Promise
         .sort({ createdAt: -1 })
         .limit(10);
 
-      const report = synthesizeAdaptiveInterviewReport({
+      const report: IInterviewReport = synthesizeAdaptiveInterviewReport({
         targetRole: session.targetRole,
         targetCompany: session.targetCompany,
         allTargetSkills: session.targetSkills && session.targetSkills.length > 0
@@ -562,7 +562,7 @@ export const finishInterviewSession = async (req: Request, res: Response): Promi
       .sort({ createdAt: -1 })
       .limit(10);
 
-    const report = synthesizeAdaptiveInterviewReport({
+    const report: IInterviewReport = synthesizeAdaptiveInterviewReport({
       targetRole: session.targetRole,
       targetCompany: session.targetCompany,
       allTargetSkills: session.targetSkills && session.targetSkills.length > 0

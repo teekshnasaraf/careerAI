@@ -324,6 +324,10 @@ test("End-to-End Integration & Production Readiness — Phase 5 Test Suite", asy
     });
 
     assert.equal(report.overallScore, 83);
+    assert.ok(Array.isArray(report.topicBreakdown), "Report must contain topicBreakdown array");
+    assert.equal(report.topicBreakdown.length, 1);
+    assert.equal(report.topicBreakdown[0].topic, "React");
+    assert.equal(report.topicBreakdown[0].score, 83);
     assert.equal(report.historicalComparison?.scoreDelta, 13, "Score delta should be 83 - 70 = +13");
     assert.equal(report.assessedSkills.length, 1);
     assert.ok(report.unassessedSkills.includes("TypeScript"));

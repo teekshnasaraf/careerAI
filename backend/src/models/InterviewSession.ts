@@ -30,6 +30,33 @@ export interface IAssessedSkillSummary {
   status: "strong" | "competent" | "weak";
 }
 
+export interface IInterviewReport {
+  overallScore: number;
+  topicBreakdown: Array<{ topic: string; score: number }>;
+  assessedSkills: IAssessedSkillSummary[];
+  unassessedSkills: string[];
+  dimensionScores: {
+    technicalCorrectness: number;
+    accuracy: number;
+    depth: number;
+    communication: number;
+    practicalApplication: number;
+  };
+  strengths: string[];
+  weaknesses: string[];
+  conceptsToRevise: string[];
+  suggestedResources: string[];
+  suggestedProjects: string[];
+  recommendedRoadmapSteps: string[];
+  recommendedNextInterview: string;
+  historicalComparison?: {
+    previousAverageScore: number;
+    scoreDelta: number;
+    sessionsAnalyzed: number;
+    note: string;
+  };
+}
+
 export interface IInterviewSession extends Document {
   user: mongoose.Types.ObjectId;
   mode: string;
@@ -71,32 +98,7 @@ export interface IInterviewSession extends Document {
   responses: IInterviewResponse[];
   overallScore: number;
   status: "in_progress" | "completed";
-  report?: {
-    overallScore: number;
-    topicBreakdown: Array<{ topic: string; score: number }>;
-    assessedSkills?: IAssessedSkillSummary[];
-    unassessedSkills?: string[];
-    dimensionScores?: {
-      technicalCorrectness: number;
-      accuracy: number;
-      depth: number;
-      communication: number;
-      practicalApplication: number;
-    };
-    strengths: string[];
-    weaknesses: string[];
-    conceptsToRevise: string[];
-    suggestedResources: string[];
-    suggestedProjects: string[];
-    recommendedRoadmapSteps?: string[];
-    recommendedNextInterview: string;
-    historicalComparison?: {
-      previousAverageScore: number;
-      scoreDelta: number;
-      sessionsAnalyzed: number;
-      note: string;
-    };
-  };
+  report?: IInterviewReport;
   createdAt: Date;
   updatedAt: Date;
 }

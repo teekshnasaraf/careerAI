@@ -44,6 +44,33 @@ export interface AssessedSkillSummary {
   status: "strong" | "competent" | "weak";
 }
 
+export interface InterviewReportData {
+  overallScore: number;
+  topicBreakdown: Array<{ topic: string; score: number }>;
+  assessedSkills: AssessedSkillSummary[];
+  unassessedSkills: string[];
+  dimensionScores: {
+    technicalCorrectness: number;
+    accuracy: number;
+    depth: number;
+    communication: number;
+    practicalApplication: number;
+  };
+  strengths: string[];
+  weaknesses: string[];
+  conceptsToRevise: string[];
+  suggestedResources: string[];
+  suggestedProjects: string[];
+  recommendedRoadmapSteps: string[];
+  recommendedNextInterview: string;
+  historicalComparison?: {
+    previousAverageScore: number;
+    scoreDelta: number;
+    sessionsAnalyzed: number;
+    note: string;
+  };
+}
+
 export interface InterviewSessionData {
   _id: string;
   user: string;
@@ -74,32 +101,7 @@ export interface InterviewSessionData {
   responses: EvaluationEntry[];
   overallScore: number;
   status: "in_progress" | "completed";
-  report?: {
-    overallScore: number;
-    topicBreakdown: Array<{ topic: string; score: number }>;
-    assessedSkills?: AssessedSkillSummary[];
-    unassessedSkills?: string[];
-    dimensionScores?: {
-      technicalCorrectness: number;
-      accuracy: number;
-      depth: number;
-      communication: number;
-      practicalApplication: number;
-    };
-    strengths: string[];
-    weaknesses: string[];
-    conceptsToRevise: string[];
-    suggestedResources: string[];
-    suggestedProjects: string[];
-    recommendedRoadmapSteps?: string[];
-    recommendedNextInterview: string;
-    historicalComparison?: {
-      previousAverageScore: number;
-      scoreDelta: number;
-      sessionsAnalyzed: number;
-      note: string;
-    };
-  };
+  report?: InterviewReportData;
   createdAt: string;
   updatedAt: string;
 }
