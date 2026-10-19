@@ -34,7 +34,7 @@ To maintain strict documentation integrity, the repository has been audited dire
 | **Job Description Parsing & Matching** | **Fully Implemented** | Contextual priority inheritance (`required`, `preferred`, `unspecified`), weighted formula (1.0, 0.5, 0.75), evidence mapping in [jobDescription.service.ts](file:///d:/coding/careerAI/backend/src/services/jobDescription.service.ts) and [jobMatch.service.ts](file:///d:/coding/careerAI/backend/src/services/jobMatch.service.ts). |
 | **Project-to-JD Relevance Matching** | **Fully Implemented** | Per-project job value scoring based on required/preferred skill coverage, domain alignment, and responsibility alignment in [projectJobMatching.service.ts](file:///d:/coding/careerAI/backend/src/services/projectJobMatching.service.ts). |
 | **Google Gemini AI Pipeline** | **Fully Implemented** | Multi-model fallback (`gemini-2.0-flash` -> `gemma-4-26b-a4b-it` -> `gemini-2.0-flash-lite`) with rule-based fallback in [ai.service.ts](file:///d:/coding/careerAI/backend/src/services/ai.service.ts). |
-| **Mock Interview System** | **Fully Implemented** | Session lifecycle, personalized question generation, multi-criteria answer evaluation, and comprehensive completion reports in [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts). |
+| **Adaptive AI Interview Engine** | **Fully Implemented** | Dynamic question adaptation, 5-dimension engineering rubric evaluation, decision policy (follow-ups/difficulty tuning), topic prioritization from JD and roadmap gaps, and session recovery in [adaptiveInterview.service.ts](file:///d:/coding/careerAI/backend/src/services/adaptiveInterview.service.ts) and [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts). |
 | **User Authentication & Authorization** | **Fully Implemented** | Bcrypt hashing, JWT issuance/verification, Zod request body validation in [auth.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/auth.controller.ts) and [auth.middleware.ts](file:///d:/coding/careerAI/backend/src/middleware/auth.middleware.ts). |
 | **Cloud File Storage** | **Fully Implemented** | Cloudinary raw resource upload with local disk fallback in [cloudinary.ts](file:///d:/coding/careerAI/backend/src/config/cloudinary.ts). |
 | **Skill Dependency Graph & Roadmap** | **Fully Implemented** | Directed acyclic graph (DAG) cycle detection (3-color DFS), topological sorting (Kahn's algorithm with priority tie-breaking), transitive dependency expansion, and interactive personalized roadmap tracking in [skillGraph.service.ts](file:///d:/coding/careerAI/backend/src/services/skillGraph.service.ts), [roadmap.service.ts](file:///d:/coding/careerAI/backend/src/services/roadmap.service.ts), and [Roadmap.ts](file:///d:/coding/careerAI/backend/src/models/Roadmap.ts). |
@@ -980,11 +980,87 @@ Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) 
 
 ## 13. Other Feature Pipelines
 
-### 13.1 Interactive Mock Interview Simulator
-- **Endpoints:** `POST /api/interview/start`, `POST /api/interview/submit-answer`, `POST /api/interview/finish`, `GET /api/interview/stats`.
-- **Modes:** Mixed, Resume Based, Technical, System Design, HR, Behavioural, Aptitude.
-- **Resume Integration:** In Resume-Based and Mixed modes, candidate's parsed projects and skills are directly injected into Gemini prompt context to ask questions about candidate's actual projects.
-- **Real-Time Evaluation:** Evaluates each answer on accuracy, communication, technical correctness, depth, confidence (0–100), and provides an STAR-structured ideal answer and follow-up question.
+### 13.1 Adaptive AI Interview Engine (Phase 3 Implementation)
+
+Phase 3 upgrades the interview simulator from a static questionnaire into a personalized, dynamically adapting technical interview engine that adjusts difficulty, investigates gaps with targeted follow-ups, and evaluates responses using a 5-dimension rubric.
+
+```mermaid
+stateDiagram-v2
+    [*] --> SessionInit : POST /api/interview/start (Role, JD, Mode)
+    SessionInit --> TopicPrioritization : Pull JD Requirements, Roadmap Gaps & Resume Evidence
+    TopicPrioritization --> InitialQuestion : Generate Diagnostic Question (Medium Difficulty)
+    
+    state ActiveInterview {
+        InitialQuestion --> AwaitingAnswer : Render Question & Assessed Skill Badge
+        AwaitingAnswer --> Evaluation : POST /api/interview/submit-answer
+        Evaluation --> RubricScoring : 5 Dimensions: Tech (30%), Acc (20%), Depth (20%), Practical (15%), Comm (15%)
+        
+        state DecisionPolicy <<choice>>
+        RubricScoring --> DecisionPolicy : determineNextAdaptiveAction()
+        
+        DecisionPolicy --> HarderQuestion : Score >= 80% (Advance difficulty / next skill)
+        DecisionPolicy --> FollowUp : 60% <= Score < 80% and Depth < 2 (Clarification inquiry)
+        DecisionPolicy --> EasierQuestion : Score < 60% and Hard/Medium (Foundational check)
+        DecisionPolicy --> NextSkill : Gap recorded / Skill questions cap reached
+        
+        HarderQuestion --> AwaitingAnswer : Append Adaptive Question
+        FollowUp --> AwaitingAnswer : Append Targeted Follow-Up
+        EasierQuestion --> AwaitingAnswer : Append Foundational Question
+        NextSkill --> AwaitingAnswer : Append Next Priority Topic Question
+    }
+    
+    DecisionPolicy --> ReportSynthesis : Budget exhausted (currentCount >= length)
+    ActiveInterview --> ReportSynthesis : POST /api/interview/finish
+    ReportSynthesis --> CompletedSession : Assessed vs Unassessed Skills, Roadmap Steps & Historical Delta
+    CompletedSession --> [*]
+```
+
+#### 13.1.1 5-Dimension Evaluation Rubric & Mathematical Formulation
+Answers are evaluated across 5 documented dimensions using an explicit weighted scoring formula:
+
+$$\text{Overall Score} = \text{round}\Big(0.30 \times \text{TechCorrectness} + 0.20 \times \text{Accuracy} + 0.20 \times \text{Depth} + 0.15 \times \text{PracticalApplication} + 0.15 \times \text{Communication}\Big)$$
+
+| Dimension | Weight | Evaluation Criteria |
+| :--- | :---: | :--- |
+| **Technical Correctness** | **30%** | Accuracy of programming syntax, core algorithmic principles, architectural terminology, and data models. |
+| **Accuracy & Relevance** | **20%** | Direct adherence to the question prompt without evasive generalization or off-topic digressions. |
+| **Depth of Explanation** | **20%** | Demonstration of internal mechanics, runtime behaviors, memory trade-offs, and scalability bottlenecks. |
+| **Practical Application** | **15%** | Incorporation of concrete implementation patterns, realistic production examples, or code structure. |
+| **Communication & Clarity** | **15%** | Structured, concise engineering communication (definition $\rightarrow$ implementation $\rightarrow$ trade-offs). |
+
+#### 13.1.2 Adaptive Decision Policy & Difficulty Progression
+The decision policy in [adaptiveInterview.service.ts](file:///d:/coding/careerAI/backend/src/services/adaptiveInterview.service.ts) governs state transitions after every answer evaluation:
+- **Strong Performance ($\text{Score} \ge 80\%$):**
+  - From `Easy`: Advances to `Medium` on the same skill to evaluate practical application.
+  - From `Medium`: Advances to `Hard` to test senior architectural scale and edge cases (if questions on skill $< 2$).
+  - From `Hard`: Mastery confirmed; rotates to the next prioritized topic.
+- **Partially Correct ($60\% \le \text{Score} < 80\%$):**
+  - If `followupDepth < 2`: Launches a targeted `follow_up` question referencing the candidate's exact answer and probing the identified gap.
+  - If `followupDepth \ge 2`: Concludes follow-up inquiry and advances to `next_skill` to preserve interview breadth.
+- **Weak / Incomplete ($\text{Score} < 60\%$):**
+  - If `Hard`: Drops difficulty to `Medium` to assess standard implementations.
+  - If `Medium`: Drops difficulty to `Easy` to verify foundational principles.
+  - If `Easy`: Records foundational gap, updates skill status to `"weak"`, and rotates to `next_skill` to prevent candidate stalling.
+- **Stopping Limits:**
+  - Hard budget cap: Stops once total responses reach session length (`5`, `10`, or `20` questions).
+  - Maximum 2 questions per skill unless follow-up is actively clarifying an edge case.
+
+#### 13.1.3 Personalization & Topic Prioritization Algorithm
+Topics are ranked deterministically by combining multiple data sources:
+1. **Direct Required Job Skills (Weight 4.0):** Extracted from job description requirements (`required`).
+2. **Roadmap Missing Prerequisites & Gaps (Weight 3.5):** Extracted from candidate's active `Roadmap` document.
+3. **Unspecified Job Requirements (Weight 2.5):** Extracted from job description body text.
+4. **Preferred Job Requirements (Weight 2.0):** Nice-to-have job skills (`preferred`).
+5. **Resume-Demonstrated Skills (Weight 1.8):** Verified skills on candidate's resume (tested for depth verification).
+- **Assessed Penalty:** Skills already assessed in the current session are deprioritized below unassessed skills.
+
+#### 13.1.4 Session Recovery & Reliability Architecture
+- **Recovery Endpoints:** `GET /api/interview/active` and `GET /api/interview/session/:id` allow candidates to refresh or navigate away without losing progress.
+- **Duplicate Guard:** `submitQuestionAnswer` rejects duplicate submissions of the same question ID with `400 Bad Request`.
+- **Zero-Hallucination Fallback:** When Gemini is unavailable, rate-limited, or returns invalid JSON:
+  - Empty answers immediately score `0` with explicit remediation advice.
+  - Non-empty answers are scored deterministically by parsing technical terminology density, structural length, and concept relevance against the 5-dimension rubric.
+  - Curated question banks across all taxonomy skills guarantee immediate question delivery.
 
 ### 13.2 Progress Tracking & Weekly Coach
 - **Endpoint:** `GET /api/progress/stats`.
@@ -1022,8 +1098,10 @@ Defined in [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx) 
 | `POST` | `/api/analysis/skill-gap` | Yes | `analysis.controller.runSkillGapAnalysis` | `{ targetRole }` | `{ success: true, data: AnalysisDocument }` |
 | `GET` | `/api/dashboard/stats` | Yes | `dashboard.controller.getDashboardStats` | None | `{ success: true, data: { resumeUploaded, resumeScore, atsScore, ... } }` |
 | `GET` | `/api/interview/stats` | Yes | `interview.controller.getInterviewHistoryStats`| None | `{ success: true, data: { questionsSolved, mockInterviewsCompleted, ... } }` |
-| `POST` | `/api/interview/start` | Yes | `interview.controller.startInterviewSession` | `{ mode, difficulty, length, targetCompany, targetRole }` | `{ success: true, data: InterviewSession }` |
-| `POST` | `/api/interview/submit-answer` | Yes | `interview.controller.submitQuestionAnswer` | `{ sessionId, questionId, questionText, userAnswer }` | `{ success: true, data: { sessionId, evaluation } }` |
+| `GET` | `/api/interview/active` | Yes | `interview.controller.getActiveInterviewSession` | None | `{ success: true, data: InterviewSession \| null }` |
+| `GET` | `/api/interview/session/:id` | Yes | `interview.controller.getInterviewSessionById` | URL Param `:id` | `{ success: true, data: InterviewSession }` |
+| `POST` | `/api/interview/start` | Yes | `interview.controller.startInterviewSession` | `{ mode, difficulty, length, targetCompany, targetRole, isAdaptive?, jobDescription? }` | `{ success: true, data: InterviewSession }` |
+| `POST` | `/api/interview/submit-answer` | Yes | `interview.controller.submitQuestionAnswer` | `{ sessionId, questionId, questionText, userAnswer }` | `{ success: true, data: { sessionId, evaluation, nextQuestion?, isFinished? } }` |
 | `POST` | `/api/interview/finish` | Yes | `interview.controller.finishInterviewSession` | `{ sessionId }` | `{ success: true, data: InterviewSession }` |
 | `GET` | `/api/progress/stats` | Yes | `progress.controller.getProgressStats` | None | `{ success: true, data: { currentResumeScore, achievements, activeRoadmap, ... } }` |
 | `GET` | `/api/settings` | Yes | `settings.controller.getUserSettings` | None | `{ success: true, data: UserSettings }` |
@@ -1067,15 +1145,17 @@ node -r ts-node/register --test `
   src/services/resumeScoring.service.test.ts `
   src/services/resumeStructuredExtractor.service.test.ts `
   src/services/skillExtractor.service.test.ts `
-  src/services/skillGraph.service.test.ts
+  src/services/skillGraph.service.test.ts `
+  src/services/adaptiveInterview.service.test.ts
 ```
 
 ### 16.2 Actual Verification Results
-- **Total Tests Executed:** 145 tests
-- **Passing Tests:** 145
+- **Total Tests Executed:** 163 tests
+- **Passing Tests:** 163
 - **Failing Tests:** 0
-- **Execution Duration:** ~2.5 seconds
+- **Execution Duration:** ~2.8 seconds
 - **Breakdown by Test File:**
+  - `adaptiveInterview.service.test.ts`: 18 tests passed (strong answers step-up difficulty, partially correct answers trigger targeted clarification follow-up, weak answers trigger foundational check, required unassessed skills prioritized, assessed skills deprioritized, follow-up incorporates gap/parent question, distinct questions and normalized skill names, question and follow-up budget enforcement, completion report aggregation, empty answers score 0 without fabrication, bounded rubric scores 0-100, 5-dimension rubric weights formula, final report distinguishes assessed from untested skills, historical comparison calculates score deltas, question bank covers all tiers, empty responses edge case handled, duplicate skill aliases normalized, unknown skill fallback).
   - `skillGraph.service.test.ts`: 18 tests passed (valid DAG construction with 0 cycles across curated graph, 2-node cycle detection, multi-node cycle detection, topological ordering with prerequisites before dependents, multi-prerequisite resolution, shared prerequisite deduplication, retention of unmet prerequisites absent from JD, exclusion of candidate-demonstrated skills, alias normalization, required vs preferred prioritization, deterministic tie-breaking, empty target lists, unknown skill definitions, cyclic definition rejection, deterministic educational fallback, roadmap 4-phase assignment, completion percentage calculation, and downstream unlock mapping).
   - `jobMatch.service.test.ts`: 51 tests passed (covering formulas, weights, priority inheritance, ambiguous skills, realistic JDs, and 12 dedicated explainability scenarios: score breakdowns, prioritized missing skills, classification reasons, resume evidence extraction, duplicate collapse, and zero inflation).
   - `profileCompleteness.service.test.ts`: 17 tests passed (covering empty states, required vs optional fields, and profile flags).
@@ -1130,6 +1210,19 @@ flowchart LR
     F --> G[Render Dual-View UI: Ordered Steps + SVG Graph]
 ```
 
+### 17.4 Adaptive AI Interview State Machine
+```mermaid
+flowchart LR
+    A[Session Start: Prioritize Topics] --> B[Generate Diagnostic Question]
+    B --> C[Candidate Submits Answer]
+    C --> D[5-Dimension Rubric Evaluation]
+    D --> E{Adaptive Decision Policy}
+    E -->|Score >= 80%| F[Harder Question / Next Skill]
+    E -->|60% <= Score < 80%| G[Targeted Follow-Up Investigation]
+    E -->|Score < 60%| H[Foundational Question / Record Gap]
+    E -->|Budget Exhausted| I[Synthesize Final Performance Report]
+```
+
 ---
 
 ## 18. Implementation Status and Gaps
@@ -1141,15 +1234,15 @@ flowchart LR
 - Priority-weighted job description matcher with evidence mapping and mathematical explainability (Phase 1).
 - Directed skill dependency graph with 3-color DFS cycle validation and Kahn's topological sort (Phase 2).
 - Intelligent, personalized learning roadmap generation with practical exercises, deliverables, and interactive step completion tracking (Phase 2).
+- Adaptive AI interview engine with 5-dimension rubric, dynamic difficulty tuning, gap follow-ups, and session recovery (Phase 3).
 - Per-project strength and relevance analyzers.
 - Multi-model Gemini integration with rule-based and curated template fallbacks.
-- Mock interview question generator and answer evaluator.
 - Authenticated JWT user management and MongoDB data lifecycle.
-- Clean Vite/React frontend dashboard with interactive charts, dual-view roadmap, and tabs.
+- Clean Vite/React frontend dashboard with interactive charts, dual-view roadmap, adaptive mock interview workbench, and tabs.
 
 ### 18.2 Discovered Gaps & Differences from Documentation
 1. **Database Mismatch in README:** The root `README.md` lists PostgreSQL and Prisma ORM. The real implementation is built on MongoDB with Mongoose.
-2. **Dashboard Mock Counts:** `interviewCount` and `questionsPracticed` in `dashboard.controller.ts` return hardcoded `0` rather than aggregating from `InterviewSession`. (Note: [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts) does properly aggregate live completed sessions and active roadmap completion).
+2. **Dashboard Interview Counts Resolved:** `interviewCount` and `questionsPracticed` in `dashboard.controller.ts` now query real aggregated data from `InterviewSession` rather than hardcoded zeroes.
 3. **Email Notifications:** `nodemailer` is listed in `backend/package.json`, but no mailer service or email verification workflows are active.
 4. **Cloudinary Fallback URL:** When Cloudinary environment keys are not provided, files are referenced via `http://localhost:5000/uploads/resumes/`. Ensure static serving is enabled in production.
 
@@ -1170,6 +1263,7 @@ flowchart LR
 - [skillExtractor.service.ts](file:///d:/coding/careerAI/backend/src/services/skillExtractor.service.ts): Taxonomy regex matcher, contextual disambiguator, and ranking engine.
 - [skillGraph.service.ts](file:///d:/coding/careerAI/backend/src/services/skillGraph.service.ts): Directed acyclic graph validator (3-color DFS), transitive dependency expander, and Kahn's topological sorter.
 - [roadmap.service.ts](file:///d:/coding/careerAI/backend/src/services/roadmap.service.ts): Personalized learning roadmap synthesizer with phased curriculum and deterministic educational templates.
+- [adaptiveInterview.service.ts](file:///d:/coding/careerAI/backend/src/services/adaptiveInterview.service.ts): Adaptive AI interview state machine, 5-dimension rubric evaluator, topic prioritization, and performance report generator.
 - [resumeStructuredExtractor.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeStructuredExtractor.service.ts): Cohesive education, experience, and project entity extractor.
 - [resumeScoring.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeScoring.service.ts): 6-component deterministic resume scoring engine.
 - [resumeParser.service.ts](file:///d:/coding/careerAI/backend/src/services/resumeParser.service.ts): Legacy unified ATS score calculator and section checklist generator.
@@ -1185,18 +1279,20 @@ flowchart LR
 - [resume.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/resume.controller.ts) / [Resume.ts](file:///d:/coding/careerAI/backend/src/models/Resume.ts): Resume upload, parsing, and retrieval.
 - [jobMatch.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/jobMatch.controller.ts): Job match endpoint.
 - [roadmap.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/roadmap.controller.ts) / [Roadmap.ts](file:///d:/coding/careerAI/backend/src/models/Roadmap.ts): Learning roadmap generation, retrieval, step updates, and model.
+- [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts) / [InterviewSession.ts](file:///d:/coding/careerAI/backend/src/models/InterviewSession.ts): Adaptive AI mock interview sessions, dynamic adaptation, and models.
 - [analysis.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/analysis.controller.ts) / [Analysis.ts](file:///d:/coding/careerAI/backend/src/models/Analysis.ts): AI resume analysis and section rewriting.
-- [interview.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/interview.controller.ts) / [InterviewSession.ts](file:///d:/coding/careerAI/backend/src/models/InterviewSession.ts): Mock interview sessions.
 - [progress.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/progress.controller.ts) / [Progress.ts](file:///d:/coding/careerAI/backend/src/models/Progress.ts): Learning journey, roadmap completion aggregation, and timeline.
+- [dashboard.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/dashboard.controller.ts): Dashboard stats aggregated with live interview metrics.
 - [settings.controller.ts](file:///d:/coding/careerAI/backend/src/controllers/settings.controller.ts) / [UserSettings.ts](file:///d:/coding/careerAI/backend/src/models/UserSettings.ts): User settings and preferences.
 
 ### 19.4 Frontend Application Files
 - [router.tsx](file:///d:/coding/careerAI/frontend/src/app/router.tsx): Application route definitions.
 - [api.ts](file:///d:/coding/careerAI/frontend/src/services/api.ts): Axios interceptor configuration with JWT injection.
 - [jobs.service.ts](file:///d:/coding/careerAI/frontend/src/features/jobs/jobs.service.ts): Job matching, roadmap generation, and step status update API client.
+- [interview.service.ts](file:///d:/coding/careerAI/frontend/src/features/interview/interview.service.ts): Adaptive interview session management, answer evaluation, and recovery API client.
 - [ResumePage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Resume/ResumePage.tsx): Active resume viewer, ATS insight tabs, Explainable Job Match UI, Dual-View Learning Roadmap, and Interactive SVG Skill Dependency Graph.
+- [InterviewPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Interview/InterviewPage.tsx): Adaptive AI mock interview workbench with 5-dimension rubric breakdown, difficulty indicators, follow-up callouts, and performance report.
 - [AnalysisPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Analysis/AnalysisPage.tsx): Quality score cards, section rewrites, and skill gap roadmaps.
-- [InterviewPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Interview/InterviewPage.tsx): Interactive mock interview flow.
 - [DashboardPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Dashboard/DashboardPage.tsx): High-level career readiness metric cards.
 - [ProgressPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Progress/ProgressPage.tsx): Visual progress tracking and achievement badges.
 - [SettingsPage.tsx](file:///d:/coding/careerAI/frontend/src/pages/Settings/SettingsPage.tsx): Career profile and preferences forms.

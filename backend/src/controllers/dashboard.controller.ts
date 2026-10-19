@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import Resume from "../models/Resume";
 import Analysis from "../models/Analysis";
 
+import InterviewSession from "../models/InterviewSession";
+
 export const getDashboardStats = async (
   req: Request,
   res: Response
@@ -13,12 +15,13 @@ export const getDashboardStats = async (
     const analysis = await Analysis.findOne({ user: req.userId }).sort({
       updatedAt: -1,
     });
+    const sessions = await InterviewSession.find({ user: req.userId });
 
     const resumeUploaded = Boolean(resume);
     const resumeScore = analysis?.resumeScore || resume?.atsScore || 0;
     const atsScore = analysis?.atsScore || resume?.atsScore || 0;
-    const interviewCount = 0; // Mock interview count metric
-    const questionsPracticed = 0; // Questions practiced metric
+    const interviewCount = sessions.filter((s) => s.status === "completed").length;
+    const questionsPracticed = sessions.flatMap((s) => s.responses).length;
     const lastResumeUpload = resume?.createdAt ? resume.createdAt.toISOString() : null;
     const lastAnalysisDate = analysis?.updatedAt ? analysis.updatedAt.toISOString() : null;
     const targetRole = analysis?.targetRole || "Full Stack Engineer";
